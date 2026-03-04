@@ -1,0 +1,93 @@
+{
+  "projectType": "saas",
+  "projectName": "CURaise",
+  "projectDescription": "A full-stack fundraising platform for organizations to manage campaigns, sell items, and process orders with buyer and seller portals.",
+  "theme": "almond",
+  "primaryColor": "#E85D75",
+  "lightColor": "#F8B4C1",
+  "darkColor": "#C53A5A",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": ["introduction", "quickstart"]
+          },
+          {
+            "group": "Buyer Guide",
+            "pages": [
+              "buyer/browse-fundraisers",
+              "buyer/placing-orders",
+              "buyer/managing-orders",
+              "buyer/account-settings"
+            ]
+          },
+          {
+            "group": "Seller Guide",
+            "pages": [
+              "seller/organization-setup",
+              "seller/creating-fundraisers",
+              "seller/managing-items",
+              "seller/processing-orders",
+              "seller/referral-program"
+            ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "development/architecture",
+              "development/setup",
+              "development/database-schema",
+              "development/authentication"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/overview",
+              "api/authentication",
+              "api/fundraisers",
+              "api/orders",
+              "api/organizations",
+              "api/users"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Organization management with admin authorization",
+    "Fundraiser campaigns with items and pickup events",
+    "Order processing with Venmo and manual payment methods",
+    "Referral program for tracking campaign ambassadors",
+    "Buyer and seller portals with distinct workflows",
+    "Email notifications via Mailgun",
+    "Image upload and management",
+    "Real-time order status tracking"
+  ],
+  "publicApiSurface": [
+    "GET /api/fundraiser/:id",
+    "GET /api/fundraiser",
+    "POST /api/fundraiser",
+    "PUT /api/fundraiser/:id",
+    "DELETE /api/fundraiser/:id",
+    "GET /api/order",
+    "POST /api/order",
+    "PUT /api/order/:id",
+    "GET /api/organization/:id",
+    "POST /api/organization",
+    "PUT /api/organization/:id",
+    "GET /api/user/:id",
+    "POST /api/user",
+    "PUT /api/user/:id",
+    "POST /api/email/send"
+  ]
+}
