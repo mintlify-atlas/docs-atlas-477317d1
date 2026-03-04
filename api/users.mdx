@@ -1,0 +1,567 @@
+---
+title: Users API
+description: Manage user profiles and data
+---
+
+## Get User
+
+<CodeGroup>
+```bash cURL
+curl https://api.curaise.com/api/user/123e4567-e89b-12d3-a456-426614174000
+```
+
+```typescript TypeScript
+const response = await fetch(
+  'https://api.curaise.com/api/user/123e4567-e89b-12d3-a456-426614174000'
+)
+const data = await response.json()
+```
+</CodeGroup>
+
+**GET** `/api/user/:id`
+
+Retrieves public profile information for a user.
+
+### Authentication
+
+Public endpoint - no authentication required.
+
+### Path Parameters
+
+<ParamField path="id" type="string (uuid)" required>
+  User ID
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "User retrieved"
+</ResponseField>
+
+<ResponseField name="data" type="User">
+  User object
+  
+  <Expandable title="User">
+    <ResponseField name="id" type="string (uuid)">
+      User ID (matches Supabase Auth user ID)
+    </ResponseField>
+    
+    <ResponseField name="email" type="string">
+      User email address
+    </ResponseField>
+    
+    <ResponseField name="name" type="string">
+      User full name
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## Search User by Email
+
+<CodeGroup>
+```bash cURL
+curl "https://api.curaise.com/api/user/search?email=user@example.com"
+```
+
+```typescript TypeScript
+const email = encodeURIComponent('user@example.com')
+const response = await fetch(
+  `https://api.curaise.com/api/user/search?email=${email}`
+)
+const data = await response.json()
+```
+</CodeGroup>
+
+**GET** `/api/user/search`
+
+Searches for a user by email address.
+
+### Authentication
+
+Public endpoint - no authentication required.
+
+### Query Parameters
+
+<ParamField query="email" type="string" required>
+  Email address to search for (must be valid email format)
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "User retrieved"
+</ResponseField>
+
+<ResponseField name="data" type="User">
+  User object matching the email address
+</ResponseField>
+
+### Error Responses
+
+**404 Not Found** if no user exists with that email:
+
+```json
+{
+  "message": "User not found"
+}
+```
+
+---
+
+## Update User
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.curaise.com/api/user/123e4567-e89b-12d3-a456-426614174000 \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "John Doe"
+  }'
+```
+
+```typescript TypeScript
+const response = await fetch(
+  'https://api.curaise.com/api/user/123e4567-e89b-12d3-a456-426614174000',
+  {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      name: 'John Doe'
+    })
+  }
+)
+const data = await response.json()
+```
+</CodeGroup>
+
+**POST** `/api/user/:id`
+
+Updates a user's profile information.
+
+### Authentication
+
+Required - user can only update their own profile.
+
+### Authorization
+
+The authenticated user's ID must match the `:id` parameter:
+
+```typescript
+if (authenticatedUserId !== req.params.id) {
+  return 403 Forbidden
+}
+```
+
+### Path Parameters
+
+<ParamField path="id" type="string (uuid)" required>
+  User ID (must match authenticated user)
+</ParamField>
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  User's full name (1-255 characters)
+</ParamField>
+
+**Note:** Currently only the `name` field can be updated. Email changes must be done through Supabase Auth.
+
+### Response
+
+<ResponseField name="message" type="string">
+  "User updated"
+</ResponseField>
+
+<ResponseField name="data" type="User">
+  Updated user object
+</ResponseField>
+
+---
+
+## Get User Orders
+
+<CodeGroup>
+```bash cURL
+curl https://api.curaise.com/api/user/123e4567-e89b-12d3-a456-426614174000/orders \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```typescript TypeScript
+const response = await fetch(
+  'https://api.curaise.com/api/user/123e4567-e89b-12d3-a456-426614174000/orders',
+  {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  }
+)
+const data = await response.json()
+```
+</CodeGroup>
+
+**GET** `/api/user/:id/orders`
+
+Retrieves all orders placed by a user.
+
+### Authentication
+
+Required - user can only view their own orders.
+
+### Authorization
+
+The authenticated user's ID must match the `:id` parameter.
+
+### Path Parameters
+
+<ParamField path="id" type="string (uuid)" required>
+  User ID (must match authenticated user)
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Orders retrieved"
+</ResponseField>
+
+<ResponseField name="data" type="Order[]">
+  Array of order objects (BasicOrderSchema)
+  
+  <Expandable title="Order">
+    <ResponseField name="id" type="string (uuid)">
+      Order ID
+    </ResponseField>
+    <ResponseField name="paymentMethod" type="enum">
+      `VENMO` or `OTHER`
+    </ResponseField>
+    <ResponseField name="paymentStatus" type="enum">
+      `UNVERIFIABLE`, `PENDING`, or `CONFIRMED`
+    </ResponseField>
+    <ResponseField name="pickedUp" type="boolean">
+      Whether order has been picked up
+    </ResponseField>
+    <ResponseField name="createdAt" type="string (date)">
+      Order creation timestamp
+    </ResponseField>
+    <ResponseField name="updatedAt" type="string (date)">
+      Last update timestamp
+    </ResponseField>
+    <ResponseField name="buyer" type="User">
+      User who placed the order (will be same as requested user)
+    </ResponseField>
+    <ResponseField name="fundraiser" type="Fundraiser">
+      Associated fundraiser (BasicFundraiserSchema)
+    </ResponseField>
+    <ResponseField name="referral" type="Referral | null">
+      Referral used (if any)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## Get User Organizations
+
+<CodeGroup>
+```bash cURL
+curl https://api.curaise.com/api/user/123e4567-e89b-12d3-a456-426614174000/organizations \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```typescript TypeScript
+const response = await fetch(
+  'https://api.curaise.com/api/user/123e4567-e89b-12d3-a456-426614174000/organizations',
+  {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  }
+)
+const data = await response.json()
+```
+</CodeGroup>
+
+**GET** `/api/user/:id/organizations`
+
+Retrieves all organizations where the user is an admin.
+
+### Authentication
+
+Required - user can only view their own organizations.
+
+### Authorization
+
+The authenticated user's ID must match the `:id` parameter.
+
+### Path Parameters
+
+<ParamField path="id" type="string (uuid)" required>
+  User ID (must match authenticated user)
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Organizations retrieved"
+</ResponseField>
+
+<ResponseField name="data" type="Organization[]">
+  Array of organization objects (BasicOrganizationSchema)
+  
+  <Expandable title="Organization">
+    <ResponseField name="id" type="string (uuid)">
+      Organization ID
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      Organization name
+    </ResponseField>
+    <ResponseField name="description" type="string">
+      Organization description
+    </ResponseField>
+    <ResponseField name="authorized" type="boolean">
+      Whether organization is verified
+    </ResponseField>
+    <ResponseField name="logoUrl" type="string | null">
+      Organization logo URL
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## User Lifecycle
+
+### 1. Sign Up (Supabase Auth)
+
+Users are created through Supabase authentication:
+
+```typescript
+const { data, error } = await supabase.auth.signUp({
+  email: 'user@example.com',
+  password: 'secure-password',
+  options: {
+    data: {
+      name: 'John Doe'
+    }
+  }
+})
+```
+
+**Result:**
+- User created in Supabase Auth
+- User record created in CURaise database
+- User ID synchronized between systems
+
+### 2. Update Profile
+
+Users update their profile via the API:
+
+```typescript
+POST /api/user/:id
+{
+  name: "Updated Name"
+}
+```
+
+### 3. User Activities
+
+**As Buyer:**
+- Browse fundraisers
+- Place orders
+- View order history via `GET /api/user/:id/orders`
+
+**As Organization Admin:**
+- Create/manage organizations
+- Create/manage fundraisers
+- View organization fundraisers via `GET /api/user/:id/organizations`
+
+---
+
+## Pending Users
+
+When an organization invites an admin by email who doesn't have an account yet:
+
+1. **PendingUser record created**
+   ```typescript
+   {
+     id: "pending-uuid",
+     email: "invitee@example.com"
+   }
+   ```
+
+2. **Invitation email sent**
+   - Contains signup link
+   - Explains organization invitation
+
+3. **User signs up**
+   - Creates full User record
+   - PendingUser record linked to new User
+   - User automatically added as organization admin
+
+4. **User appears in organization admins**
+   ```typescript
+   GET /api/organization/:id
+   {
+     admins: [
+       { id: "user-uuid", email: "invitee@example.com", name: "New Admin" }
+     ]
+   }
+   ```
+
+---
+
+## Error Responses
+
+### 403 Forbidden - Unauthorized Access
+
+```json
+{
+  "message": "Unauthorized to view user orders"
+}
+```
+
+or
+
+```json
+{
+  "message": "Unauthorized to update user"
+}
+```
+
+Returned when trying to access another user's data.
+
+### 404 Not Found
+
+```json
+{
+  "message": "User not found"
+}
+```
+
+Returned when user ID doesn't exist or email search yields no results.
+
+### 500 Internal Server Error - Parse Error
+
+```json
+{
+  "message": "Couldn't parse user"
+}
+```
+
+or
+
+```json
+{
+  "message": "Failed to parse orders"
+}
+```
+
+Rare error indicating schema validation failure.
+
+---
+
+## TypeScript Types
+
+### User Schema
+
+```typescript
+import { z } from 'zod'
+
+export const UserSchema = z.object({
+  id: z.string().uuid(),
+  email: z.string().email(),
+  name: z.string()
+})
+
+export type User = z.infer<typeof UserSchema>
+```
+
+### Update User Body
+
+```typescript
+export const UpdateUserBody = z.object({
+  name: z.string().min(1).max(255)
+})
+
+export type UpdateUserBody = z.infer<typeof UpdateUserBody>
+```
+
+### Pending User Schema
+
+```typescript
+export const PendingUserSchema = z.object({
+  id: z.string().uuid(),
+  email: z.string().email()
+})
+
+export type PendingUser = z.infer<typeof PendingUserSchema>
+```
+
+---
+
+## Integration Example
+
+### Complete User Profile Management
+
+```typescript
+import { createClient } from '@supabase/supabase-js'
+
+const supabase = createClient(supabaseUrl, supabaseAnonKey)
+
+// 1. Sign up
+const { data: authData, error: authError } = await supabase.auth.signUp({
+  email: 'user@example.com',
+  password: 'password',
+  options: {
+    data: { name: 'John Doe' }
+  }
+})
+
+const userId = authData.user?.id
+
+// 2. Get session token
+const { data: { session } } = await supabase.auth.getSession()
+const token = session?.access_token
+
+// 3. Update profile
+const updateResponse = await fetch(
+  `https://api.curaise.com/api/user/${userId}`,
+  {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      name: 'John Michael Doe'
+    })
+  }
+)
+
+// 4. Get user's orders
+const ordersResponse = await fetch(
+  `https://api.curaise.com/api/user/${userId}/orders`,
+  {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  }
+)
+const { data: orders } = await ordersResponse.json()
+
+// 5. Get user's organizations
+const orgsResponse = await fetch(
+  `https://api.curaise.com/api/user/${userId}/organizations`,
+  {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  }
+)
+const { data: organizations } = await orgsResponse.json()
+```

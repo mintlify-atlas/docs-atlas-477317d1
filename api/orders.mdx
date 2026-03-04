@@ -1,0 +1,465 @@
+---
+title: Orders API
+description: Manage customer orders
+---
+
+## Get Order
+
+<CodeGroup>
+```bash cURL
+curl https://api.curaise.com/api/order/123e4567-e89b-12d3-a456-426614174000 \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```typescript TypeScript
+const response = await fetch(
+  'https://api.curaise.com/api/order/123e4567-e89b-12d3-a456-426614174000',
+  {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  }
+)
+const data = await response.json()
+```
+</CodeGroup>
+
+**GET** `/api/order/:id`
+
+Retrieves details about a specific order.
+
+### Authentication
+
+Required - user must be either:
+- The buyer of the order, OR
+- An admin of the fundraiser's organization
+
+### Path Parameters
+
+<ParamField path="id" type="string (uuid)" required>
+  Order ID
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Order retrieved"
+</ResponseField>
+
+<ResponseField name="data" type="CompleteOrder">
+  Complete order object with items
+  
+  <Expandable title="CompleteOrder">
+    <ResponseField name="id" type="string (uuid)">
+      Order ID
+    </ResponseField>
+    
+    <ResponseField name="paymentMethod" type="enum">
+      Payment method used: `VENMO` or `OTHER`
+    </ResponseField>
+    
+    <ResponseField name="paymentStatus" type="enum">
+      Current payment status:
+      - `UNVERIFIABLE` - Payment cannot be verified
+      - `PENDING` - Payment awaiting confirmation
+      - `CONFIRMED` - Payment verified by admin
+    </ResponseField>
+    
+    <ResponseField name="pickedUp" type="boolean">
+      Whether order has been picked up
+    </ResponseField>
+    
+    <ResponseField name="createdAt" type="string (date)">
+      Order creation timestamp
+    </ResponseField>
+    
+    <ResponseField name="updatedAt" type="string (date)">
+      Last update timestamp
+    </ResponseField>
+    
+    <ResponseField name="buyer" type="User">
+      User who placed the order
+      <Expandable title="User">
+        <ResponseField name="id" type="string (uuid)">
+          User ID
+        </ResponseField>
+        <ResponseField name="email" type="string">
+          User email
+        </ResponseField>
+        <ResponseField name="name" type="string">
+          User full name
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    
+    <ResponseField name="fundraiser" type="Fundraiser">
+      Associated fundraiser (BasicFundraiserSchema)
+    </ResponseField>
+    
+    <ResponseField name="referral" type="Referral | null">
+      Referral used for this order (if any)
+    </ResponseField>
+    
+    <ResponseField name="items" type="OrderItem[]">
+      Array of items in this order
+      <Expandable title="OrderItem">
+        <ResponseField name="quantity" type="number">
+          Quantity ordered (positive integer)
+        </ResponseField>
+        <ResponseField name="item" type="Item">
+          Item details (CompleteItemSchema)
+          <Expandable title="Item">
+            <ResponseField name="id" type="string (uuid)">
+              Item ID
+            </ResponseField>
+            <ResponseField name="name" type="string">
+              Item name
+            </ResponseField>
+            <ResponseField name="description" type="string">
+              Item description
+            </ResponseField>
+            <ResponseField name="price" type="string (decimal)">
+              Item price at time of order
+            </ResponseField>
+            <ResponseField name="imageUrl" type="string | null">
+              Item image URL
+            </ResponseField>
+            <ResponseField name="offsale" type="boolean">
+              Whether item is currently unavailable
+            </ResponseField>
+          </Expandable>
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## Create Order
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.curaise.com/api/order/create \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fundraiserId": "123e4567-e89b-12d3-a456-426614174000",
+    "items": [
+      {
+        "itemId": "987e6543-e21b-12d3-a456-426614174999",
+        "quantity": 2
+      },
+      {
+        "itemId": "456e7890-e12b-34c5-a678-901234567890",
+        "quantity": 1
+      }
+    ],
+    "payment_method": "VENMO",
+    "referralId": "abc12345-e89b-12d3-a456-426614174abc"
+  }'
+```
+
+```typescript TypeScript
+const response = await fetch('https://api.curaise.com/api/order/create', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    fundraiserId: '123e4567-e89b-12d3-a456-426614174000',
+    items: [
+      {
+        itemId: '987e6543-e21b-12d3-a456-426614174999',
+        quantity: 2
+      },
+      {
+        itemId: '456e7890-e12b-34c5-a678-901234567890',
+        quantity: 1
+      }
+    ],
+    payment_method: 'VENMO',
+    referralId: 'abc12345-e89b-12d3-a456-426614174abc'
+  })
+})
+const data = await response.json()
+```
+</CodeGroup>
+
+**POST** `/api/order/create`
+
+Creates a new order for a fundraiser.
+
+### Authentication
+
+Required - authenticated user becomes the buyer.
+
+### Request Body
+
+<ParamField body="fundraiserId" type="string (uuid)" required>
+  ID of the fundraiser to order from
+</ParamField>
+
+<ParamField body="items" type="OrderItem[]" required>
+  Array of items to order (minimum 1 item)
+  
+  <Expandable title="OrderItem">
+    <ParamField body="itemId" type="string (uuid)" required>
+      ID of the item to order
+    </ParamField>
+    
+    <ParamField body="quantity" type="number" required>
+      Quantity to order (positive integer)
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="payment_method" type="enum" required>
+  Payment method: `VENMO` or `OTHER`
+</ParamField>
+
+<ParamField body="referralId" type="string (uuid)" optional>
+  Referral ID if using a referral code
+</ParamField>
+
+### Validation
+
+The order will be rejected if:
+- Fundraiser buying period hasn't started (`buyingStartsAt > now`)
+- Fundraiser buying period has ended (`buyingEndsAt < now`)
+- Any item IDs are invalid
+- Items array is empty
+- Quantities are not positive integers
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Order created"
+</ResponseField>
+
+<ResponseField name="data" type="Order">
+  Created order object (BasicOrderSchema)
+  
+  **Note:** Order confirmation email is sent automatically to the buyer.
+</ResponseField>
+
+**Status Code:** `201 Created`
+
+---
+
+## Complete Order Pickup
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.curaise.com/api/order/123e4567-e89b-12d3-a456-426614174000/complete-pickup \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```typescript TypeScript
+const response = await fetch(
+  'https://api.curaise.com/api/order/123e4567-e89b-12d3-a456-426614174000/complete-pickup',
+  {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  }
+)
+const data = await response.json()
+```
+</CodeGroup>
+
+**POST** `/api/order/:id/complete-pickup`
+
+Marks an order as picked up.
+
+### Authentication
+
+Required - user must be an admin of the fundraiser's organization.
+
+### Path Parameters
+
+<ParamField path="id" type="string (uuid)" required>
+  Order ID
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Order pickup completed"
+</ResponseField>
+
+<ResponseField name="data" type="Order">
+  Updated order with `pickedUp: true`
+</ResponseField>
+
+---
+
+## Confirm Order Payment
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.curaise.com/api/order/123e4567-e89b-12d3-a456-426614174000/confirm-payment \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```typescript TypeScript
+const response = await fetch(
+  'https://api.curaise.com/api/order/123e4567-e89b-12d3-a456-426614174000/confirm-payment',
+  {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  }
+)
+const data = await response.json()
+```
+</CodeGroup>
+
+**POST** `/api/order/:id/confirm-payment`
+
+Confirms payment has been received for an order.
+
+### Authentication
+
+Required - user must be an admin of the fundraiser's organization.
+
+### Path Parameters
+
+<ParamField path="id" type="string (uuid)" required>
+  Order ID
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Order payment confirmed"
+</ResponseField>
+
+<ResponseField name="data" type="Order">
+  Updated order with `paymentStatus: "CONFIRMED"`
+</ResponseField>
+
+---
+
+## Order Workflow
+
+Typical order lifecycle:
+
+1. **Customer creates order**
+   - `POST /api/order/create`
+   - Order created with `paymentStatus: "PENDING"` or `"UNVERIFIABLE"` (depending on payment method)
+   - Confirmation email sent
+
+2. **Customer pays**
+   - Payment occurs outside the API (Venmo, cash, etc.)
+
+3. **Admin confirms payment** (optional)
+   - `POST /api/order/:id/confirm-payment`
+   - Updates `paymentStatus` to `"CONFIRMED"`
+
+4. **Customer picks up items**
+   - Customer arrives at pickup event
+
+5. **Admin marks as picked up**
+   - `POST /api/order/:id/complete-pickup`
+   - Updates `pickedUp` to `true`
+
+---
+
+## OrderItems Junction Table
+
+The `items` field in CompleteOrderSchema represents a many-to-many relationship between Orders and Items:
+
+```typescript
+interface OrderItem {
+  quantity: number;      // From junction table
+  item: CompleteItem;    // Joined item details
+}
+```
+
+**Database structure:**
+```sql
+OrderItems (
+  orderId UUID,
+  itemId UUID,
+  quantity INTEGER,
+  PRIMARY KEY (orderId, itemId)
+)
+```
+
+This allows:
+- Multiple items per order
+- Different quantities for each item
+- Same item in multiple orders
+- Price history (item price stored at order creation)
+
+---
+
+## Payment Status Flow
+
+### VENMO Orders
+
+If `payment_method: "VENMO"`:
+1. Initial status: `PENDING`
+2. Admin verifies payment in Venmo account
+3. Admin calls `/confirm-payment`
+4. Status changes to `CONFIRMED`
+
+### OTHER Payment Methods
+
+If `payment_method: "OTHER"` (cash, check, etc.):
+1. Initial status: `UNVERIFIABLE`
+2. Payment verified in person
+3. Admin can optionally call `/confirm-payment`
+4. Status changes to `CONFIRMED`
+
+**Note:** Payment confirmation is optional but recommended for record-keeping.
+
+---
+
+## Error Responses
+
+### 403 Forbidden - Unauthorized Access
+
+```json
+{
+  "message": "Unauthorized to view order"
+}
+```
+
+Returned when user is neither the buyer nor an organization admin.
+
+### 400 Bad Request - Buying Period
+
+```json
+{
+  "message": "Fundraiser buying period has not started"
+}
+```
+
+or
+
+```json
+{
+  "message": "Fundraiser buying period has ended"
+}
+```
+
+### 404 Not Found
+
+```json
+{
+  "message": "Order not found"
+}
+```
+
+or
+
+```json
+{
+  "message": "Fundraiser not found"
+}
+```

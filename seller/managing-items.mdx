@@ -1,0 +1,378 @@
+---
+title: 'Managing Items'
+description: 'Add, update, and manage items for sale in your fundraisers'
+icon: 'box'
+---
+
+## Overview
+
+Items are the products you sell in your fundraisers. Each item has a name, description, price, and optional image. You can control item availability and track sales through the platform.
+
+## Adding Items
+
+<Steps>
+  <Step title="Navigate to Fundraiser Management">
+    Go to your fundraiser page at `/seller/fundraiser/:fundraiserId`.
+  </Step>
+  
+  <Step title="Open Add Item Dialog">
+    Click "Add Item" to open the item creation form.
+  </Step>
+  
+  <Step title="Fill Item Details">
+    <ParamField path="name" type="string" required>
+      Item name (1-255 characters)
+      
+      ```typescript
+      z.string().min(1).max(255)
+      ```
+    </ParamField>
+    
+    <ParamField path="description" type="string" required>
+      Detailed description of the item
+    </ParamField>
+    
+    <ParamField path="price" type="Decimal" required>
+      Item price (stored as `@db.Money` with 2 decimal places)
+      
+      ```typescript
+      MoneySchema // Decimal type
+      ```
+    </ParamField>
+    
+    <ParamField path="imageUrl" type="string">
+      URL of the item image
+      
+      ```typescript
+      z.string().url().optional()
+      ```
+    </ParamField>
+    
+    <ParamField path="offsale" type="boolean" required>
+      Whether the item is currently available for purchase
+      
+      Default: `false` (item is available)
+      
+      ```typescript
+      z.boolean()
+      ```
+    </ParamField>
+  </Step>
+  
+  <Step title="Submit Item">
+    Create the item - it will be immediately available for orders (unless marked offsale).
+  </Step>
+</Steps>
+
+## Database Schema
+
+```prisma
+model Item {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  description String
+  imageUrl    String?  @map("image_url")
+  offsale     Boolean  @default(false)
+  limit       Int?
+  price       Decimal  @db.Money
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  fundraiser   Fundraiser   @relation(fields: [fundraiserId], references: [id])
+  fundraiserId String       @map("fundraiser_id") @db.Uuid
+  orders       OrderItems[]
+}
+```
+
+## Updating Items
+
+Modify item details after creation:
+
+```typescript
+PUT /item/:itemId
+
+Body: UpdateFundraiserItemBody {
+  name: string;
+  description: string;
+  price: Decimal;
+  imageUrl?: string;
+  offsale: boolean;
+}
+
+Response: {
+  message: string;
+  data: Item;
+}
+```
+
+### Common Updates
+
+<AccordionGroup>
+  <Accordion title="Changing Item Price">
+    Update the `price` field to change the item cost. This affects new orders but doesn't change prices on existing orders.
+    
+    ```typescript
+    {
+      "price": "15.99"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Updating Item Description">
+    Modify the `description` to add more details or correct information.
+    
+    ```typescript
+    {
+      "description": "Updated description with more details"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Adding/Changing Item Image">
+    Upload a new image and update the `imageUrl` field.
+    
+    ```typescript
+    {
+      "imageUrl": "https://example.com/new-image.jpg"
+    }
+    ```
+    
+    To remove an image, set `imageUrl` to `null`.
+  </Accordion>
+</AccordionGroup>
+
+## Inventory Management
+
+### Taking Items Off Sale
+
+Mark items as unavailable without deleting them:
+
+```typescript
+PUT /item/:itemId
+
+Body: {
+  ...existingItemData,
+  offsale: true
+}
+```
+
+<Info>
+  When `offsale: true`, the item:
+  - ❌ Cannot be added to new orders
+  - ✅ Remains visible in existing orders
+  - ✅ Appears in analytics and reports
+  - ✅ Can be put back on sale by setting `offsale: false`
+</Info>
+
+### Inventory Limits
+
+<Note>
+  The `limit` field exists in the schema but is currently not enforced in the application logic. Future updates may add quantity tracking and automatic inventory management.
+</Note>
+
+If you need to limit quantities:
+1. Track orders manually through analytics
+2. Calculate total quantities sold per item
+3. Mark items as `offsale: true` when limits are reached
+
+## Deleting Items
+
+<Warning>
+  Deleting items is a destructive operation. Consider marking items as `offsale` instead of deleting them.
+</Warning>
+
+```typescript
+DELETE /item/:itemId
+
+Response: {
+  message: string;
+  data: Item;
+}
+```
+
+**Before deleting an item:**
+- ✅ Ensure no active orders reference this item
+- ✅ Check analytics to preserve sales history
+- ✅ Consider archiving by setting `offsale: true` instead
+
+## Item Analytics
+
+Track item performance through fundraiser analytics:
+
+```typescript
+GET /fundraiser/:fundraiserId/analytics
+
+Response: {
+  items: Record<string, number>; // Item name → quantity sold
+  // ... other analytics
+}
+```
+
+### Calculating Revenue per Item
+
+```typescript
+// From fundraiser analytics page
+const itemRevenue: Record<string, number> = {};
+
+Object.entries(analytics.items).forEach(([itemName, count]) => {
+  const price = itemPriceMap.get(itemName) || 0;
+  itemRevenue[itemName] = count * price;
+});
+```
+
+<Info>
+  Item quantities in analytics only count orders that are:
+  - `pickedUp: true`, OR
+  - `paymentStatus: "CONFIRMED"`
+  
+  Pending orders are tracked separately.
+</Info>
+
+## API Reference
+
+### Create Item
+
+```typescript
+POST /fundraiser/:fundraiserId/items
+
+Body: CreateFundraiserItemBody
+
+Response: {
+  message: string;
+  data: Item;
+}
+```
+
+### Get Fundraiser Items
+
+```typescript
+GET /fundraiser/:fundraiserId/items
+
+Response: {
+  message: string;
+  data: Item[];  // Ordered by createdAt ASC
+}
+```
+
+### Get Single Item
+
+```typescript
+GET /item/:itemId
+
+Response: {
+  message: string;
+  data: Item;
+}
+```
+
+### Update Item
+
+```typescript
+PUT /item/:itemId
+
+Body: UpdateFundraiserItemBody
+
+Response: {
+  message: string;
+  data: Item;
+}
+```
+
+### Delete Item
+
+```typescript
+DELETE /item/:itemId
+
+Response: {
+  message: string;
+  data: Item;
+}
+```
+
+## TypeScript Types
+
+### Zod Schemas
+
+```typescript
+// From common/schemas/item.ts
+export const BasicItemSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  description: z.string(),
+  price: MoneySchema,
+});
+
+export const CompleteItemSchema = BasicItemSchema.extend({
+  imageUrl: z.string().url().nullish(),
+  offsale: z.boolean(),
+});
+
+// From common/schemas/fundraiser.ts
+export const CreateFundraiserItemBody = z.object({
+  name: z.string().min(1).max(255),
+  description: z.string(),
+  price: MoneySchema,
+  imageUrl: z.string().url().optional(),
+  offsale: z.boolean(),
+});
+
+export const UpdateFundraiserItemBody = z.object({
+  name: z.string().min(1).max(255),
+  description: z.string(),
+  price: MoneySchema,
+  imageUrl: z.string().url().optional(),
+  offsale: z.boolean(),
+});
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Descriptive Names" icon="tag">
+    Use clear, specific item names that customers can easily identify.
+  </Card>
+  
+  <Card title="Detailed Descriptions" icon="file-lines">
+    Include size, color, materials, and any other relevant details.
+  </Card>
+  
+  <Card title="Quality Images" icon="image">
+    Upload high-resolution images showing the item clearly.
+  </Card>
+  
+  <Card title="Accurate Pricing" icon="dollar-sign">
+    Double-check prices before publishing - changing prices affects only new orders.
+  </Card>
+</CardGroup>
+
+## Common Issues
+
+<AccordionGroup>
+  <Accordion title="Item not appearing for buyers">
+    Check that:
+    - `offsale: false` (item is on sale)
+    - Fundraiser is published
+    - Current date is within `buyingStartsAt` and `buyingEndsAt`
+    - Organization is authorized
+  </Accordion>
+  
+  <Accordion title="Can't update item price">
+    Ensure you have admin permissions for the organization. Only organization admins can modify items.
+  </Accordion>
+  
+  <Accordion title="Item showing wrong quantity sold">
+    Analytics are cached for 2 hours. Wait for cache refresh or check real-time data at `/fundraiser/:id/analytics`.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Process Orders" icon="receipt" href="/seller/processing-orders">
+    Learn how to manage customer orders
+  </Card>
+  
+  <Card title="Referral Program" icon="user-group" href="/seller/referral-program">
+    Set up referral tracking for your fundraiser
+  </Card>
+</CardGroup>

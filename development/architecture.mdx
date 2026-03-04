@@ -1,0 +1,364 @@
+---
+title: "Architecture Overview"
+description: "Understanding CURaise's monorepo structure, backend patterns, and frontend architecture"
+---
+
+## Monorepo Structure
+
+CURaise is organized as a monorepo with three interconnected packages:
+
+<CardGroup cols={3}>
+  <Card title="Backend" icon="server">
+    Express.js + TypeScript + Prisma ORM for the REST API
+  </Card>
+  <Card title="Frontend" icon="browser">
+    Next.js 15 (App Router) + React 19 + TypeScript for the web application
+  </Card>
+  <Card title="Common" icon="code">
+    Shared Zod schemas for type-safe API contracts
+  </Card>
+</CardGroup>
+
+```
+curaise/
+├── backend/          # Express.js REST API
+│   ├── prisma/       # Database schema & migrations
+│   └── src/
+│       ├── api/      # API modules (user, fundraiser, order, etc.)
+│       └── middleware/
+├── frontend/         # Next.js 15 application
+│   └── src/
+│       ├── app/      # App Router pages
+│       ├── components/
+│       └── lib/
+└── common/           # Shared Zod schemas
+    └── schemas/
+```
+
+## Backend Architecture
+
+### Modular Router Pattern
+
+The backend follows a **consistent modular structure** for each API module:
+
+```
+/api/{module}/
+  ├── {module}.router.ts    # Route definitions
+  ├── {module}.handlers.ts  # Request/response orchestration
+  ├── {module}.services.ts  # Database operations (Prisma)
+  ├── {module}.types.ts     # TypeScript interfaces
+  └── index.ts              # Module exports
+```
+
+**Current modules**: `email`, `fundraiser`, `order`, `organization`, `referral`, `user`
+
+### Request Flow
+
+Every API request follows this pipeline:
+
+<Steps>
+  <Step title="Route Matching">
+    Request URL is matched to a route in `{module}.router.ts`
+  </Step>
+  <Step title="Middleware Execution">
+    - `authenticate`: Validates JWT token with Supabase
+    - `validate`: Validates request params/query/body against Zod schemas
+  </Step>
+  <Step title="Handler Orchestration">
+    Handler extracts validated data and calls service functions
+  </Step>
+  <Step title="Service Layer">
+    Service queries database using Prisma ORM
+  </Step>
+  <Step title="Response Validation">
+    Handler validates response with Zod schema, returns `{ message, data }`
+  </Step>
+</Steps>
+
+### Example: User Router
+
+```typescript backend/src/api/user/user.router.ts
+import { Router } from "express";
+import { authenticate } from "../../middleware/authenticate";
+import validate from "../../middleware/validate";
+import { UserRouteParams } from "./user.types";
+import { UpdateUserBody } from "common";
+import { getUserHandler, updateUserHandler } from "./user.handlers";
+
+const userRouter = Router();
+
+// Public route - no authentication
+userRouter.get(
+  "/:id",
+  validate({ params: UserRouteParams }),
+  asyncHandler(getUserHandler)
+);
+
+// Protected route - requires JWT
+userRouter.post(
+  "/:id",
+  validate({ params: UserRouteParams, body: UpdateUserBody }),
+  authenticate,
+  asyncHandler(updateUserHandler)
+);
+
+export default userRouter;
+```
+
+### Middleware Architecture
+
+<AccordionGroup>
+  <Accordion title="authenticate.ts - JWT Validation">
+    Validates JWT tokens from the `Authorization: Bearer {token}` header using Supabase's service role key. Attaches authenticated user to `res.locals.user`.
+
+    ```typescript backend/src/middleware/authenticate.ts
+    export const authenticate = async <ParamsT, BodyT, QueryT>(
+      req: Request<ParamsT, any, BodyT, QueryT>,
+      res: Response,
+      next: NextFunction
+    ) => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser(
+        req.headers.authorization?.split("Bearer ")[1]
+      );
+
+      if (!user) {
+        res.status(401).json({ message: "Invalid authorization token" });
+        return;
+      }
+
+      res.locals.user = user;
+      next();
+    };
+    ```
+  </Accordion>
+
+  <Accordion title="validate.ts - Request Validation">
+    Validates request `params`, `query`, and `body` against Zod schemas. Returns 400 if validation fails.
+  </Accordion>
+
+  <Accordion title="authenticateOptional.ts - Optional Auth">
+    Similar to `authenticate`, but allows requests to proceed even without a valid token. Useful for endpoints that behave differently for authenticated vs. anonymous users.
+  </Accordion>
+</AccordionGroup>
+
+## Frontend Architecture
+
+### Next.js App Router Structure
+
+```
+/app/
+  ├── /auth              # Login/logout flows
+  ├── /buyer             # Customer-facing routes
+  │   ├── /browse        # Browse fundraisers
+  │   ├── /fundraiser/:id
+  │   ├── /order         # Order management
+  │   └── /account       # User profile
+  ├── /seller            # Organization admin routes
+  │   ├── /fundraiser    # Create/manage fundraisers
+  │   ├── /order         # View orders
+  │   └── /org           # Organization settings
+  └── /page.tsx          # Landing page
+```
+
+<Note>
+  **Protected Routes**: All `/buyer/**` and `/seller/**` routes require authentication, enforced by Next.js middleware.
+</Note>
+
+### Frontend-Backend Communication
+
+The **fetcher pattern** provides type-safe API communication:
+
+<Tabs>
+  <Tab title="authFetcher">
+    For authenticated requests. Automatically attaches JWT from Supabase session.
+
+    ```typescript frontend/src/lib/fetcher.ts
+    export const authFetcher =
+      <T extends z.ZodTypeAny>(schema: T) =>
+      async (url: string): Promise<z.infer<T>> => {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        const response = await fetch(process.env.NEXT_PUBLIC_API_URL! + url, {
+          headers: {
+            Authorization: "Bearer " + session.access_token,
+          },
+        });
+        const result = await response.json();
+
+        // Validate response against schema
+        const data = schema.safeParse(result.data);
+        return data.data;
+      };
+    ```
+
+    **Usage with SWR**:
+    ```typescript
+    import { CompleteUserSchema } from "common";
+
+    const { data, error } = useSWR(
+      `/user/${userId}`,
+      authFetcher(CompleteUserSchema)
+    );
+    ```
+  </Tab>
+
+  <Tab title="noAuthFetcher">
+    For public endpoints. No authentication required.
+
+    ```typescript
+    const { data } = useSWR(
+      `/fundraiser/${id}`,
+      noAuthFetcher(CompleteFundraiserSchema)
+    );
+    ```
+  </Tab>
+
+  <Tab title="mutationFetch">
+    For POST/PUT/DELETE operations:
+
+    ```typescript
+    const result = await mutationFetch(`/order`, {
+      method: "POST",
+      token: session.access_token,
+      body: orderData,
+    });
+    ```
+  </Tab>
+</Tabs>
+
+### State Management
+
+<CardGroup cols={2}>
+  <Card title="Zustand" icon="cart-shopping">
+    **Shopping Cart State**
+    
+    - Persists to localStorage
+    - Organized per fundraiser (Map: `fundraiserId → CartItem[]`)
+    - Methods: `addItem`, `removeItem`, `updateQuantity`, `clearCart`
+    
+    Location: `/frontend/src/lib/store/useCartStore.ts`
+  </Card>
+
+  <Card title="SWR" icon="rotate">
+    **Data Fetching & Caching**
+    
+    - Automatic revalidation
+    - Works with `authFetcher`/`noAuthFetcher`
+    - Handles loading and error states
+  </Card>
+</CardGroup>
+
+## Common Package (Shared Schemas)
+
+All API contracts are defined using **Zod schemas** in the `common` package:
+
+### Schema Types
+
+<Tabs>
+  <Tab title="Basic Schemas">
+    Minimal fields for list responses:
+
+    ```typescript common/schemas/fundraiser.ts
+    export const BasicFundraiserSchema = z.object({
+      id: z.string().uuid(),
+      name: z.string(),
+      description: z.string(),
+      imageUrls: z.array(z.string()),
+      // ... essential fields only
+    });
+    ```
+  </Tab>
+
+  <Tab title="Complete Schemas">
+    Full relations for detail views:
+
+    ```typescript
+    export const CompleteFundraiserSchema = BasicFundraiserSchema.extend({
+      organization: BasicOrganizationSchema,
+      items: z.array(CompleteItemSchema),
+      pickupEvents: z.array(PickupEventSchema),
+      announcements: z.array(AnnouncementSchema),
+    });
+    ```
+  </Tab>
+
+  <Tab title="Body Schemas">
+    Request validation:
+
+    ```typescript
+    export const CreateOrderBody = z.object({
+      fundraiserId: z.string().uuid(),
+      items: z.array(OrderItemInput),
+      paymentMethod: PaymentMethodSchema,
+      referralId: z.string().uuid().optional(),
+    });
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  After changing schemas in `common/`, you **must** rebuild the package:
+  ```bash
+  cd common && pnpm build
+  ```
+</Warning>
+
+## Tech Stack
+
+### Backend
+
+| Technology | Purpose |
+|------------|--------|
+| **Express.js** | HTTP server framework |
+| **TypeScript** | Type safety |
+| **Prisma ORM** | Database access layer |
+| **Supabase Auth** | JWT-based authentication |
+| **Zod** | Runtime validation |
+| **Mailgun** | Email delivery |
+| **PostgreSQL** | Relational database |
+
+### Frontend
+
+| Technology | Purpose |
+|------------|--------|
+| **Next.js 15** | React framework (App Router) |
+| **React 19** | UI library |
+| **TypeScript** | Type safety |
+| **Tailwind CSS** | Utility-first styling |
+| **Radix UI** | Accessible component primitives |
+| **shadcn/ui** | Pre-built components |
+| **SWR** | Data fetching/caching |
+| **Zustand** | Global state management |
+| **React Hook Form** | Form state management |
+| **TanStack React Table** | Data tables |
+
+### Development Tools
+
+| Tool | Purpose |
+|------|--------|
+| **pnpm** | Monorepo package management |
+| **Jest** | Backend testing |
+| **ESLint** | Code linting |
+| **nodemon** | Backend hot reload |
+| **Turbopack** | Frontend build tool |
+
+## Response Format
+
+All backend API responses follow a consistent structure:
+
+```json
+{
+  "message": "User retrieved successfully",
+  "data": {
+    "id": "123e4567-e89b-12d3-a456-426614174000",
+    "email": "user@example.com",
+    "name": "John Doe"
+  }
+}
+```
+
+The `data` field is validated against Zod schemas on both the backend (before sending) and frontend (after receiving).

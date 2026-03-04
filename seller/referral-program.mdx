@@ -1,0 +1,477 @@
+---
+title: 'Referral Program'
+description: 'Create and manage referral codes to track order attribution and reward referrers'
+icon: 'user-group'
+---
+
+## Overview
+
+The referral program allows you to create referral codes for individuals who help promote your fundraiser. Each referral tracks which orders came through that referrer, enabling you to attribute sales and reward promoters.
+
+<Info>
+  Referrals are fundraiser-specific. Each referrer must request a code for each fundraiser they want to promote.
+</Info>
+
+## How Referrals Work
+
+<Steps>
+  <Step title="Referrer Requests Code">
+    A user requests to become a referrer for your fundraiser:
+    
+    ```typescript
+    POST /fundraiser/:fundraiserId/referrals
+    
+    Body: {
+      fundraiserId: string;
+      referrerId: string;  // User ID
+    }
+    ```
+    
+    This creates a referral with `approved: false`.
+  </Step>
+  
+  <Step title="Admin Approves Referral">
+    Organization admins review and approve referral requests:
+    
+    ```typescript
+    PUT /fundraiser/:fundraiserId/referrals/:referralId/approve
+    
+    // Sets approved: true
+    ```
+  </Step>
+  
+  <Step title="Referrer Shares Code">
+    The approved referrer shares their unique referral ID with potential buyers.
+  </Step>
+  
+  <Step title="Buyers Use Code">
+    When placing orders, buyers can include the referral ID:
+    
+    ```typescript
+    POST /order
+    
+    Body: {
+      // ... order details
+      referralId: "referral-uuid"
+    }
+    ```
+  </Step>
+  
+  <Step title="Track Attribution">
+    Orders are linked to the referral, allowing you to track which referrer generated which sales.
+  </Step>
+</Steps>
+
+## Database Schema
+
+```prisma
+model Referral {
+  id        String   @id @default(uuid()) @db.Uuid
+  approved  Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  fundraiser   Fundraiser @relation(fields: [fundraiserId], references: [id], onDelete: Cascade)
+  fundraiserId String     @map("fundraiser_id") @db.Uuid
+  referrer     User       @relation(fields: [referrerId], references: [id])
+  referrerId   String     @map("referrer_id") @db.Uuid
+  orders       Order[]
+
+  @@unique([fundraiserId, referrerId])
+}
+```
+
+<Note>
+  The unique constraint on `[fundraiserId, referrerId]` ensures each user can only have one referral per fundraiser.
+</Note>
+
+## Creating Referrals
+
+Referrers create their own referral requests:
+
+```typescript
+POST /fundraiser/:fundraiserId/referrals
+
+Response: {
+  message: string;
+  data: Referral & {
+    referrer: User;
+  };
+}
+```
+
+### Duplicate Prevention
+
+If a user tries to create a duplicate referral:
+
+```typescript
+// From fundraiser.services.ts
+try {
+  const referral = await prisma.referral.create({...});
+  return referral;
+} catch (error) {
+  if ((error as any).code === "P2002") {
+    return null; // Duplicate referral request
+  }
+  throw error;
+}
+```
+
+The API returns `null` for duplicate requests instead of throwing an error.
+
+## Approving Referrers
+
+Organization admins must approve referral requests before they become active.
+
+### Viewing Pending Referrals
+
+Access the referral management modal from your fundraiser page:
+
+```typescript
+// Fundraiser includes referrals
+interface CompleteFundraiser {
+  // ... other fields
+  referrals: Referral[];
+}
+
+// Filter for pending approvals
+const pending = fundraiser.referrals.filter(ref => !ref.approved);
+```
+
+### Approving a Referral
+
+```typescript
+PUT /fundraiser/:fundraiserId/referrals/:referralId/approve
+
+Response: {
+  message: string;
+  data: Referral & {
+    referrer: User;
+  };
+}
+```
+
+This sets `approved: true`, allowing the referrer to start generating attributed orders.
+
+<Info>
+  A notification badge appears on the "Manage Referrals" button when there are pending approvals.
+</Info>
+
+### Denying Referrals
+
+To deny a referral request, delete it:
+
+```typescript
+DELETE /fundraiser/:fundraiserId/referrals/:referralId/delete
+
+Response: {
+  message: string;
+  data: Referral;
+}
+```
+
+<Warning>
+  Deleting a referral does not delete associated orders, but removes the referral attribution. Orders will have `referralId: null`.
+</Warning>
+
+## Tracking Referral Performance
+
+View referral statistics on your fundraiser analytics page:
+
+### Referrals Table
+
+Displays for each referrer:
+
+<ParamField path="referrer.name" type="string">
+  Name of the referrer
+</ParamField>
+
+<ParamField path="referrer.email" type="string">
+  Email/NetID of the referrer (shows username portion)
+</ParamField>
+
+<ParamField path="orderCount" type="number">
+  Number of orders attributed to this referrer
+  
+  ```typescript
+  // Calculated from orders
+  const orderCount = orders.filter(
+    order => order.referralId === referral.id
+  ).length;
+  ```
+</ParamField>
+
+<ParamField path="approved" type="boolean">
+  Approval status:
+  - ✅ **Approved**: Green badge
+  - ⏳ **Pending**: Yellow badge
+</ParamField>
+
+### Viewing Referral Orders
+
+Access all orders for a specific referral:
+
+```typescript
+GET /fundraiser/:fundraiserId/orders
+
+// Filter by referral
+const referralOrders = orders.filter(
+  order => order.referral?.id === referralId
+);
+```
+
+Each order includes:
+
+```typescript
+interface Order {
+  // ... order fields
+  referral?: {
+    id: string;
+    approved: boolean;
+    referrer: User;
+  };
+}
+```
+
+## Authorization
+
+Referral management requires specific permissions:
+
+### Who Can Approve Referrals?
+
+Only organization admins can approve/delete referrals:
+
+```typescript
+// Authorization check in handlers
+const fundraiser = await getFundraiser(fundraiserId);
+const isAdmin = fundraiser.organization.admins.some(
+  admin => admin.id === userId
+);
+
+if (!isAdmin) {
+  return res.status(403).json({ 
+    message: "Not authorized" 
+  });
+}
+```
+
+### Who Can Create Referrals?
+
+Any authenticated user can request to become a referrer:
+
+```typescript
+POST /fundraiser/:fundraiserId/referrals
+
+// Requires authentication, no admin check
+```
+
+## API Reference
+
+### Create Referral Request
+
+```typescript
+POST /fundraiser/:fundraiserId/referrals
+
+Authentication: Required (referrer user)
+
+Response: {
+  message: string;
+  data: Referral & {
+    referrer: User;
+  } | null;  // null if duplicate
+}
+```
+
+### Get Referral
+
+```typescript
+GET /referral/:referralId
+
+Response: {
+  message: string;
+  data: Referral & {
+    referrer: User;
+    fundraiser: {
+      organization: {
+        admins: { id: string }[];
+      };
+    };
+  };
+}
+```
+
+### Approve Referral
+
+```typescript
+PUT /fundraiser/:fundraiserId/referrals/:referralId/approve
+
+Authentication: Required (organization admin only)
+
+Response: {
+  message: string;
+  data: Referral & {
+    referrer: User;
+  };
+}
+```
+
+### Delete Referral
+
+```typescript
+DELETE /fundraiser/:fundraiserId/referrals/:referralId/delete
+
+Authentication: Required (organization admin only)
+
+Response: {
+  message: string;
+  data: Referral;
+}
+```
+
+## TypeScript Types
+
+```typescript
+// From common/schemas/fundraiser.ts
+export const ReferralSchema = z.object({
+  id: z.string().uuid(),
+  approved: z.boolean(),
+  referrer: UserSchema,
+});
+
+// Extended for table display
+export interface ReferralWithQuantities extends Referral {
+  orderCount: number;
+}
+```
+
+## UI Components
+
+### Referral Approval Modal
+
+Manage pending referral requests:
+
+```typescript
+import { ReferralApprovalModal } from "./components/ReferralApprovalModal";
+
+<ReferralApprovalModal
+  fundraiser={fundraiser}
+  token={accessToken}
+  open={isOpen}
+  setOpen={setIsOpen}
+/>
+```
+
+### Referral Button with Badge
+
+Shows pending count:
+
+```typescript
+import { ReferralButton } from "./components/ReferralApprovalModal";
+
+<ReferralButton
+  fundraiser={fundraiser}
+  onClick={() => setModalOpen(true)}
+/>
+```
+
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Influencer Tracking" icon="star">
+    Give unique codes to social media influencers and track which ones drive the most sales.
+  </Card>
+  
+  <Card title="Team Members" icon="users">
+    Allow team members to promote the fundraiser and track individual contributions.
+  </Card>
+  
+  <Card title="Commission Programs" icon="dollar-sign">
+    Use order attribution to calculate commissions or rewards for top referrers.
+  </Card>
+  
+  <Card title="Marketing Attribution" icon="chart-bar">
+    Understand which promotion channels (people) are most effective.
+  </Card>
+</CardGroup>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Approve Referrals Promptly">
+    Review and approve legitimate referral requests quickly so referrers can start promoting.
+  </Accordion>
+  
+  <Accordion title="Communicate Expectations">
+    Let referrers know:
+    - How to share their code
+    - What incentives they'll receive
+    - How you'll track their performance
+  </Accordion>
+  
+  <Accordion title="Monitor for Abuse">
+    Watch for referrers creating fake orders or using deceptive practices.
+  </Accordion>
+  
+  <Accordion title="Reward Top Performers">
+    Recognize and reward referrers who drive significant sales to encourage continued promotion.
+  </Accordion>
+</AccordionGroup>
+
+## Calculating Referral Revenue
+
+To calculate total revenue per referrer:
+
+```typescript
+// Get all orders for fundraiser
+const orders = await getFundraiserOrders(fundraiserId);
+
+// Group by referral
+const referralRevenue = new Map<string, number>();
+
+orders.forEach(order => {
+  if (order.referral && 
+      (order.pickedUp || order.paymentStatus === "CONFIRMED")) {
+    const total = order.items.reduce(
+      (sum, item) => sum + (item.quantity * Number(item.item.price)),
+      0
+    );
+    
+    const currentRevenue = referralRevenue.get(order.referral.id) || 0;
+    referralRevenue.set(order.referral.id, currentRevenue + total);
+  }
+});
+```
+
+<Info>
+  Only count orders that are picked up or have confirmed payment, matching the revenue calculation logic.
+</Info>
+
+## Common Issues
+
+<AccordionGroup>
+  <Accordion title="Referral code not working">
+    Ensure:
+    - Referral is approved (`approved: true`)
+    - Referral ID is valid and belongs to the correct fundraiser
+    - Buyer is including `referralId` in the order creation request
+  </Accordion>
+  
+  <Accordion title="Can't create referral for same fundraiser twice">
+    The unique constraint prevents duplicate referrals. Each user can only have one referral per fundraiser.
+  </Accordion>
+  
+  <Accordion title="Deleted referral still showing orders">
+    Orders retain buyer and item data but lose referral attribution when a referral is deleted. The orders remain valid.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Processing Orders" icon="receipt" href="/seller/processing-orders">
+    Learn how to manage orders from referrals
+  </Card>
+  
+  <Card title="Creating Fundraisers" icon="hand-holding-heart" href="/seller/creating-fundraisers">
+    Set up a new fundraiser with referral support
+  </Card>
+</CardGroup>

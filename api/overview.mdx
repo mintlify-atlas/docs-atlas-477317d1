@@ -1,0 +1,148 @@
+---
+title: API Overview
+description: CURaise REST API reference and conventions
+---
+
+## Introduction
+
+The CURaise REST API provides programmatic access to fundraising campaigns, orders, organizations, and user management. The API is built with Express.js and uses TypeScript with Zod validation for type-safe request/response handling.
+
+## Base URL
+
+All API endpoints are prefixed with `/api/`:
+
+```
+https://your-domain.com/api/{module}
+```
+
+**Module Routes:**
+- `/api/fundraiser` - Fundraising campaigns
+- `/api/order` - Order management
+- `/api/organization` - Organization management
+- `/api/user` - User profiles
+
+## Response Format
+
+All API responses follow a consistent JSON structure:
+
+```json
+{
+  "message": "Descriptive message about the operation",
+  "data": { /* Response payload */ }
+}
+```
+
+**Success Response Example:**
+```json
+{
+  "message": "Fundraiser retrieved",
+  "data": {
+    "id": "123e4567-e89b-12d3-a456-426614174000",
+    "name": "Campus Food Drive",
+    "description": "Help us raise funds for the campus food bank",
+    "published": true
+  }
+}
+```
+
+## Error Handling
+
+The API uses standard HTTP status codes to indicate success or failure:
+
+| Status Code | Meaning |
+|-------------|----------|
+| 200 | Success - Request completed successfully |
+| 201 | Created - Resource created successfully |
+| 400 | Bad Request - Invalid request parameters or validation error |
+| 401 | Unauthorized - Missing or invalid authentication token |
+| 403 | Forbidden - User lacks permission to perform action |
+| 404 | Not Found - Requested resource doesn't exist |
+| 500 | Internal Server Error - Server-side error |
+
+**Error Response Example:**
+```json
+{
+  "message": "Fundraiser not found"
+}
+```
+
+**Validation Error Example:**
+```json
+{
+  "message": "Validation failed",
+  "errors": [
+    {
+      "field": "email",
+      "message": "Invalid email format"
+    }
+  ]
+}
+```
+
+## Data Types
+
+### UUID
+
+All resource IDs use UUID v4 format:
+```
+"123e4567-e89b-12d3-a456-426614174000"
+```
+
+### Money (Decimal)
+
+Monetary values use Decimal.js for precision:
+- Must be non-negative
+- Maximum 2 decimal places
+- Example: `"19.99"`
+
+```typescript
+type Money = string; // Decimal string representation
+```
+
+### Dates
+
+All dates are ISO 8601 formatted strings:
+```
+"2026-03-04T12:00:00.000Z"
+```
+
+### Enums
+
+**PaymentMethod:**
+- `VENMO`
+- `OTHER`
+
+**PaymentStatus:**
+- `UNVERIFIABLE` - Payment cannot be verified
+- `PENDING` - Payment awaiting confirmation
+- `CONFIRMED` - Payment verified by admin
+
+## Pagination
+
+Currently, list endpoints return all results without pagination. Future versions may implement cursor-based pagination.
+
+## Rate Limiting
+
+No rate limiting is currently enforced. Best practices:
+- Cache responses when possible
+- Use conditional requests
+- Implement exponential backoff for retries
+
+## Versioning
+
+The API is currently unversioned. Breaking changes will be communicated via documentation updates.
+
+## Request Validation
+
+All request bodies and parameters are validated using Zod schemas. Invalid requests return `400 Bad Request` with detailed error messages.
+
+**Common Validation Rules:**
+- UUIDs must be valid v4 format
+- Email addresses must be valid
+- Strings have min/max length constraints
+- Arrays have minimum item requirements
+- Dates must be valid ISO 8601 format
+
+## CORS
+
+CORS is configured to allow requests from authorized frontend domains. Include appropriate `Origin` headers in cross-origin requests.

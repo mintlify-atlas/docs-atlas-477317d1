@@ -1,0 +1,341 @@
+---
+title: Placing Orders
+description: Learn how to add items to your cart, complete checkout, and submit orders on CURaise
+---
+
+## Overview
+
+Placing an order on CURaise involves browsing a fundraiser's items, adding them to your cart, and completing the checkout process. This guide covers the entire order placement workflow.
+
+## Viewing Fundraiser Items
+
+After selecting a fundraiser from the browse page, you'll see the fundraiser detail page at `/buyer/fundraiser/{id}` with:
+
+- **Fundraiser Information**: Name, description, hosting organization
+- **Pickup Details**: All scheduled pickup events with dates, times, and locations
+- **Announcements**: Updates from fundraiser organizers
+- **Items Grid**: Available products for purchase
+- **Cart Sidebar**: Real-time cart summary (desktop only)
+
+<Note>
+The page fetches data using two API calls:
+- `/fundraiser/{id}` - Returns `CompleteFundraiserSchema` with full details
+- `/fundraiser/{id}/items` - Returns array of `CompleteItemSchema`
+
+Source: `frontend/src/app/buyer/fundraiser/[id]/page.tsx:37-42`
+</Note>
+
+## Adding Items to Cart
+
+### Cart State Management
+
+CURaise uses Zustand with localStorage persistence for cart management:
+
+```typescript
+interface CartState {
+  // Map fundraiser IDs to cart items
+  carts: Record<string, CartItem[]>;
+  
+  addItem: (fundraiserId: string, item: CompleteItemSchema, quantity: number) => void;
+  removeItem: (fundraiserId: string, item: CompleteItemSchema) => void;
+  updateQuantity: (fundraiserId: string, item: CompleteItemSchema, quantity: number) => void;
+  clearCart: (fundraiserId: string) => void;
+}
+
+export const CartItem = z.object({
+  item: CompleteItemSchema,
+  quantity: z.number().int().nonnegative(),
+});
+```
+
+Source: `frontend/src/lib/store/useCartStore.ts:13-38`
+
+<Card title="Multi-Fundraiser Support" icon="shopping-cart">
+  The cart store maintains separate carts for each fundraiser using a `Record<string, CartItem[]>` structure. This allows buyers to shop from multiple fundraisers simultaneously without cart conflicts.
+</Card>
+
+### Item Schema
+
+Each item in the cart contains:
+
+```typescript
+export const CompleteItemSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  description: z.string(),
+  price: MoneySchema,  // Decimal.js for precise currency calculations
+  imageUrl: z.string().url().nullish(),
+  offsale: z.boolean(),
+});
+```
+
+Source: `common/schemas/item.ts:11-14`
+
+## Cart Sidebar (Desktop)
+
+The cart sidebar on desktop displays:
+
+<Steps>
+  <Step title="Cart Summary">
+    Lists all items with name, unit price, quantity, and subtotal
+  </Step>
+  
+  <Step title="Total Calculation">
+    ```typescript
+    const totalPrice = cartItems.reduce((sum, cartItem) => {
+      return sum + Number(cartItem.item.price) * cartItem.quantity;
+    }, 0);
+    ```
+    Source: `frontend/src/app/buyer/fundraiser/[id]/components/FundraiserCartSidebar.tsx:27-29`
+  </Step>
+  
+  <Step title="Checkout Button">
+    - **Mobile**: "View Cart ({count})" - navigates to `/buyer/fundraiser/{id}/cart`
+    - **Desktop**: "Proceed to Checkout" - navigates to login page with redirect to checkout
+  </Step>
+</Steps>
+
+<Warning>
+The cart sidebar is only visible on desktop (lg breakpoint and above). Mobile users must use the dedicated cart page.
+</Warning>
+
+## Checkout Flow
+
+### Authentication Requirement
+
+Checkout requires authentication:
+
+```typescript
+const handleCheckout = () => {
+  if (isEmpty) return;
+  
+  const nextCheckoutPath = `/buyer/fundraiser/${fundraiserId}/checkout`;
+  
+  // Mobile: go to cart page first
+  // Desktop: go directly to login which auto-starts Google sign-in
+  if (isMobile) {
+    router.push(`/buyer/fundraiser/${fundraiserId}/cart`);
+  } else {
+    router.push(`/login?next=${encodeURIComponent(nextCheckoutPath)}`);
+  }
+};
+```
+
+Source: `frontend/src/app/buyer/fundraiser/[id]/components/FundraiserCartSidebar.tsx:31-43`
+
+### Checkout Page Sections
+
+The checkout page at `/buyer/fundraiser/{id}/checkout` displays:
+
+<CardGroup cols={2}>
+  <Card title="Pickup Details" icon="map-pin">
+    - All pickup events with dates, locations, and times
+    - Sorted chronologically by start time
+    - Icons: Calendar, MapPin, Clock
+  </Card>
+  
+  <Card title="Referral Selection" icon="user">
+    - Optional referrer selection
+    - Searchable list of verified and unverified referrers
+    - Default: "No Referral"
+  </Card>
+  
+  <Card title="Order Summary" icon="receipt">
+    - Item images, names, unit prices
+    - Quantity controls (increase/decrease/remove)
+    - Real-time total calculation
+  </Card>
+  
+  <Card title="Payment Method" icon="credit-card">
+    - **VENMO**: Venmo payment (default)
+    - **OTHER**: Cash in-person
+  </Card>
+</CardGroup>
+
+## Payment Methods
+
+### Venmo Payment
+
+When selecting Venmo as the payment method:
+
+```typescript
+const dataToSubmit: z.infer<typeof CreateOrderBody> = {
+  fundraiserId: fundraiser.id,
+  items: cartItems,
+  payment_method: "VENMO",  // or "OTHER"
+  ...(selectedReferralId && 
+    selectedReferralId !== "none" && { referralId: selectedReferralId }),
+};
+```
+
+Source: `frontend/src/app/buyer/fundraiser/[id]/checkout/components/CheckoutForm.tsx:132-138`
+
+<Accordion title="Venmo Payment Schema">
+  ```typescript
+  export const CreateOrderBody = z.object({
+    fundraiserId: z.string().uuid(),
+    items: z.array(
+      z.object({
+        itemId: z.string().uuid(),
+        quantity: z.number().int().positive(),
+      })
+    ).min(1),
+    payment_method: z.enum(["VENMO", "OTHER"]),
+    referralId: z.string().uuid().optional(),
+  });
+  ```
+  Source: `common/schemas/order.ts:30-42`
+</Accordion>
+
+### Cash In-Person Payment
+
+Selecting "OTHER" as the payment method indicates cash payment at pickup. The order status will be set to `UNVERIFIABLE` until manually confirmed by fundraiser managers.
+
+## Submitting the Order
+
+Clicking "Place Order" triggers the order creation:
+
+<Steps>
+  <Step title="Validate Cart">
+    Ensure cart is not empty and all items are valid
+  </Step>
+  
+  <Step title="Prepare Order Data">
+    ```typescript
+    const cartItems = cart.map(({ item, quantity }) => ({
+      itemId: item.id,
+      quantity,
+    }));
+    ```
+  </Step>
+  
+  <Step title="Submit to API">
+    ```typescript
+    const result = await mutationFetch("/order/create", {
+      token,
+      body: dataToSubmit,
+    });
+    ```
+  </Step>
+  
+  <Step title="Redirect to Order Page">
+    After successful creation, redirect to:
+    ```typescript
+    redirect(
+      "/buyer/order/" + (result.data as { id: string }).id + 
+      "/submitted?fromCheckout=true"
+    );
+    ```
+    Source: `frontend/src/app/buyer/fundraiser/[id]/checkout/components/CheckoutForm.tsx:145-147`
+  </Step>
+</Steps>
+
+## Order Item Preparation
+
+The cart store provides a helper method to format items for API submission:
+
+```typescript
+prepareOrderItems: (fundraiserId) => {
+  const currentCart = get().carts[fundraiserId] || [];
+  
+  return currentCart.map(({ item, quantity }) => ({
+    itemId: item.id,
+    quantity,
+  }));
+}
+```
+
+Source: `frontend/src/lib/store/useCartStore.ts:144-151`
+
+## Pickup Event Selection
+
+While the checkout page displays all pickup events for the fundraiser, buyers don't explicitly select a pickup event during checkout. All pickup events are associated with the fundraiser and shown on the order confirmation page.
+
+<Card title="Pickup Event Schema" icon="calendar">
+  ```typescript
+  export const PickupEventSchema = z.object({
+    id: z.string().uuid(),
+    startsAt: z.coerce.date(),
+    endsAt: z.coerce.date(),
+    location: z.string(),
+  });
+  ```
+  Source: `common/schemas/fundraiser.ts:12-17`
+</Card>
+
+## Referral System
+
+The checkout page includes referral selection:
+
+- **Verified Referrers**: Approved referrals (shown with ShieldCheck icon)
+- **Unverified Referrers**: Pending approval (shown with ShieldAlert icon)
+- **Searchable**: Real-time search by referrer name
+- **Optional**: Buyers can select "No Referral"
+
+```typescript
+const approvedReferrals = fundraiser.referrals.filter((r) => r.approved);
+const unapprovedReferrals = fundraiser.referrals.filter((r) => !r.approved);
+```
+
+Source: `frontend/src/app/buyer/fundraiser/[id]/checkout/components/CheckoutForm.tsx:94-95`
+
+## Error Handling
+
+Order submission errors are handled with toast notifications:
+
+```typescript
+try {
+  const result = await mutationFetch("/order/create", {
+    token,
+    body: dataToSubmit,
+  });
+  redirect("/buyer/order/" + result.data.id + "/submitted?fromCheckout=true");
+} catch (error) {
+  toast.error(error instanceof Error ? error.message : "Failed to create order");
+  setIsSubmitting(false);
+}
+```
+
+Source: `frontend/src/app/buyer/fundraiser/[id]/checkout/components/CheckoutForm.tsx:140-152`
+
+## Best Practices
+
+<Accordion title="Quantity Management">
+  When quantity is reduced to 0, the item is automatically removed from the cart:
+  
+  ```typescript
+  const handleQuantityChange = (item: CartItem["item"], delta: number) => {
+    const currentQuantity = cart.find((ci) => ci.item.id === item.id)?.quantity || 0;
+    const newQuantity = Math.max(0, currentQuantity + delta);
+    
+    if (newQuantity === 0) {
+      removeItem(fundraiser.id, item);
+    } else {
+      updateQuantity(fundraiser.id, item, newQuantity);
+    }
+  };
+  ```
+  Source: `frontend/src/app/buyer/fundraiser/[id]/checkout/components/CheckoutForm.tsx:154-164`
+</Accordion>
+
+<Accordion title="Price Calculations">
+  Use `Decimal.js` for precise monetary calculations to avoid floating-point errors:
+  
+  ```typescript
+  import Decimal from "decimal.js";
+  
+  const orderTotal = cartWithImages
+    .reduce(
+      (total, item) => total.plus(Decimal(item.item.price).times(item.quantity)),
+      new Decimal(0)
+    )
+    .toFixed(2);
+  ```
+  Source: `frontend/src/app/buyer/fundraiser/[id]/checkout/components/CheckoutForm.tsx:103-109`
+</Accordion>
+
+## Related Resources
+
+- [Managing Orders](/buyer/managing-orders)
+- [Browsing Fundraisers](/buyer/browse-fundraisers)
+- [Account Settings](/buyer/account-settings)

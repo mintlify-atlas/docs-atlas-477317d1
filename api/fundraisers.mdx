@@ -1,0 +1,854 @@
+---
+title: Fundraisers API
+description: Manage fundraising campaigns
+---
+
+## List Fundraisers
+
+<CodeGroup>
+```bash cURL
+curl https://api.curaise.com/api/fundraiser
+```
+
+```typescript TypeScript
+const response = await fetch('https://api.curaise.com/api/fundraiser')
+const data = await response.json()
+```
+</CodeGroup>
+
+**GET** `/api/fundraiser`
+
+Retrieves all published fundraisers.
+
+### Authentication
+
+Public endpoint - no authentication required.
+
+### Response
+
+<ResponseField name="message" type="string">
+  Success message
+</ResponseField>
+
+<ResponseField name="data" type="Fundraiser[]">
+  Array of fundraiser objects
+  
+  <Expandable title="Fundraiser Object">
+    <ResponseField name="id" type="string (uuid)">
+      Unique fundraiser identifier
+    </ResponseField>
+    
+    <ResponseField name="name" type="string">
+      Fundraiser name (1-255 characters)
+    </ResponseField>
+    
+    <ResponseField name="description" type="string">
+      Detailed description
+    </ResponseField>
+    
+    <ResponseField name="published" type="boolean">
+      Whether fundraiser is publicly visible
+    </ResponseField>
+    
+    <ResponseField name="venmoUsername" type="string | null">
+      Venmo username for payments (5-30 characters)
+    </ResponseField>
+    
+    <ResponseField name="venmoEmail" type="string | null">
+      Email associated with Venmo account
+    </ResponseField>
+    
+    <ResponseField name="goalAmount" type="string (decimal) | null">
+      Target fundraising amount
+    </ResponseField>
+    
+    <ResponseField name="buyingStartsAt" type="string (date)">
+      ISO 8601 timestamp when buying period begins
+    </ResponseField>
+    
+    <ResponseField name="buyingEndsAt" type="string (date)">
+      ISO 8601 timestamp when buying period ends
+    </ResponseField>
+    
+    <ResponseField name="imageUrls" type="string[]">
+      Array of image URLs
+    </ResponseField>
+    
+    <ResponseField name="organization" type="Organization">
+      Associated organization (BasicOrganizationSchema)
+    </ResponseField>
+    
+    <ResponseField name="pickupEvents" type="PickupEvent[]">
+      Array of pickup event objects
+      
+      <Expandable title="PickupEvent">
+        <ResponseField name="id" type="string (uuid)">
+          Pickup event ID
+        </ResponseField>
+        <ResponseField name="startsAt" type="string (date)">
+          Event start time
+        </ResponseField>
+        <ResponseField name="endsAt" type="string (date)">
+          Event end time
+        </ResponseField>
+        <ResponseField name="location" type="string">
+          Pickup location description
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## Get Fundraiser
+
+<CodeGroup>
+```bash cURL
+curl https://api.curaise.com/api/fundraiser/123e4567-e89b-12d3-a456-426614174000
+```
+
+```typescript TypeScript
+const response = await fetch(
+  'https://api.curaise.com/api/fundraiser/123e4567-e89b-12d3-a456-426614174000'
+)
+const data = await response.json()
+```
+</CodeGroup>
+
+**GET** `/api/fundraiser/:id`
+
+Retrieves detailed information about a specific fundraiser.
+
+### Path Parameters
+
+<ParamField path="id" type="string (uuid)" required>
+  Fundraiser ID
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Fundraiser retrieved"
+</ResponseField>
+
+<ResponseField name="data" type="CompleteFundraiser">
+  Complete fundraiser object including announcements and referrals
+  
+  <Expandable title="CompleteFundraiser">
+    <ResponseField name="announcements" type="Announcement[]">
+      Array of announcements posted to this fundraiser
+      
+      <Expandable title="Announcement">
+        <ResponseField name="id" type="string (uuid)">
+          Announcement ID
+        </ResponseField>
+        <ResponseField name="message" type="string">
+          Announcement content
+        </ResponseField>
+        <ResponseField name="createdAt" type="string (date)">
+          Creation timestamp
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    
+    <ResponseField name="referrals" type="Referral[]">
+      Array of approved referral codes
+      
+      <Expandable title="Referral">
+        <ResponseField name="id" type="string (uuid)">
+          Referral ID
+        </ResponseField>
+        <ResponseField name="approved" type="boolean">
+          Whether referral is approved
+        </ResponseField>
+        <ResponseField name="referrer" type="User">
+          User who created the referral
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## Create Fundraiser
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.curaise.com/api/fundraiser/create \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Spring Food Drive",
+    "description": "Help us raise funds for the campus food bank",
+    "organizationId": "123e4567-e89b-12d3-a456-426614174000",
+    "buyingStartsAt": "2026-04-01T00:00:00.000Z",
+    "buyingEndsAt": "2026-04-30T23:59:59.000Z",
+    "imageUrls": ["https://example.com/image.jpg"],
+    "pickupEvents": [{
+      "startsAt": "2026-05-05T10:00:00.000Z",
+      "endsAt": "2026-05-05T14:00:00.000Z",
+      "location": "Student Center Lobby"
+    }]
+  }'
+```
+
+```typescript TypeScript
+const response = await fetch('https://api.curaise.com/api/fundraiser/create', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    name: 'Spring Food Drive',
+    description: 'Help us raise funds for the campus food bank',
+    organizationId: '123e4567-e89b-12d3-a456-426614174000',
+    buyingStartsAt: '2026-04-01T00:00:00.000Z',
+    buyingEndsAt: '2026-04-30T23:59:59.000Z',
+    imageUrls: ['https://example.com/image.jpg'],
+    pickupEvents: [{
+      startsAt: '2026-05-05T10:00:00.000Z',
+      endsAt: '2026-05-05T14:00:00.000Z',
+      location: 'Student Center Lobby'
+    }]
+  })
+})
+```
+</CodeGroup>
+
+**POST** `/api/fundraiser/create`
+
+Creates a new fundraiser.
+
+### Authentication
+
+Required - user must be an admin of the specified organization.
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Fundraiser name (1-255 characters)
+</ParamField>
+
+<ParamField body="description" type="string" required>
+  Detailed description
+</ParamField>
+
+<ParamField body="organizationId" type="string (uuid)" required>
+  Organization ID that owns this fundraiser
+</ParamField>
+
+<ParamField body="buyingStartsAt" type="string (date)" required>
+  ISO 8601 timestamp when buying period begins
+</ParamField>
+
+<ParamField body="buyingEndsAt" type="string (date)" required>
+  ISO 8601 timestamp when buying period ends
+</ParamField>
+
+<ParamField body="imageUrls" type="string[]" required>
+  Array of image URLs (must be valid URLs)
+</ParamField>
+
+<ParamField body="pickupEvents" type="PickupEvent[]" required>
+  At least one pickup event required
+  
+  <Expandable title="PickupEvent">
+    <ParamField body="startsAt" type="string (date)" required>
+      Event start time
+    </ParamField>
+    <ParamField body="endsAt" type="string (date)" required>
+      Event end time
+    </ParamField>
+    <ParamField body="location" type="string" required>
+      Pickup location description
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="venmoUsername" type="string" optional>
+  Venmo username (5-30 characters)
+</ParamField>
+
+<ParamField body="venmoEmail" type="string" optional>
+  Email for Venmo account (triggers setup email)
+</ParamField>
+
+<ParamField body="goalAmount" type="string (decimal)" optional>
+  Target fundraising amount
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Successfully created fundraiser"
+</ResponseField>
+
+<ResponseField name="data" type="Fundraiser">
+  Created fundraiser object (BasicFundraiserSchema)
+</ResponseField>
+
+---
+
+## Update Fundraiser
+
+**POST** `/api/fundraiser/:id/update`
+
+Updates an existing fundraiser.
+
+### Authentication
+
+Required - user must be an admin of the fundraiser's organization.
+
+### Path Parameters
+
+<ParamField path="id" type="string (uuid)" required>
+  Fundraiser ID
+</ParamField>
+
+### Request Body
+
+All fields from CreateFundraiserBody except `organizationId` and `pickupEvents`. Pickup events are managed separately.
+
+<ParamField body="name" type="string" required>
+  Fundraiser name (1-255 characters)
+</ParamField>
+
+<ParamField body="description" type="string" required>
+  Detailed description
+</ParamField>
+
+<ParamField body="buyingStartsAt" type="string (date)" required>
+  When buying period begins
+</ParamField>
+
+<ParamField body="buyingEndsAt" type="string (date)" required>
+  When buying period ends
+</ParamField>
+
+<ParamField body="imageUrls" type="string[]" required>
+  Array of image URLs
+</ParamField>
+
+<ParamField body="venmoUsername" type="string" optional>
+  Venmo username (5-30 characters)
+</ParamField>
+
+<ParamField body="venmoEmail" type="string" optional>
+  Email for Venmo (sends setup email if changed)
+</ParamField>
+
+<ParamField body="goalAmount" type="string (decimal)" optional>
+  Target amount
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Successfully updated fundraiser"
+</ResponseField>
+
+<ResponseField name="data" type="Fundraiser">
+  Updated fundraiser object
+</ResponseField>
+
+---
+
+## Publish Fundraiser
+
+**POST** `/api/fundraiser/:id/publish`
+
+Publishes a fundraiser, making it publicly visible.
+
+### Authentication
+
+Required - user must be an admin of the fundraiser's organization.
+
+### Path Parameters
+
+<ParamField path="id" type="string (uuid)" required>
+  Fundraiser ID
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Successfully published fundraiser"
+</ResponseField>
+
+<ResponseField name="data" type="Fundraiser">
+  Updated fundraiser with published: true
+</ResponseField>
+
+---
+
+## Get Fundraiser Items
+
+**GET** `/api/fundraiser/:id/items`
+
+Retrieves all items available in a fundraiser.
+
+### Path Parameters
+
+<ParamField path="id" type="string (uuid)" required>
+  Fundraiser ID
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Items retrieved"
+</ResponseField>
+
+<ResponseField name="data" type="Item[]">
+  Array of item objects
+  
+  <Expandable title="Item">
+    <ResponseField name="id" type="string (uuid)">
+      Item ID
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      Item name
+    </ResponseField>
+    <ResponseField name="description" type="string">
+      Item description
+    </ResponseField>
+    <ResponseField name="price" type="string (decimal)">
+      Item price
+    </ResponseField>
+    <ResponseField name="imageUrl" type="string | null">
+      Item image URL
+    </ResponseField>
+    <ResponseField name="offsale" type="boolean">
+      Whether item is currently unavailable
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## Get Fundraiser Orders
+
+**GET** `/api/fundraiser/:id/orders`
+
+Retrieves all orders for a fundraiser (admin only).
+
+### Authentication
+
+Required - user must be an admin of the fundraiser's organization.
+
+### Path Parameters
+
+<ParamField path="id" type="string (uuid)" required>
+  Fundraiser ID
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Orders retrieved"
+</ResponseField>
+
+<ResponseField name="data" type="Order[]">
+  Array of complete order objects (see Orders API)
+</ResponseField>
+
+---
+
+## Get Fundraiser Analytics
+
+**GET** `/api/fundraiser/:id/analytics`
+
+Retrieves analytics data for a fundraiser (admin only).
+
+### Authentication
+
+Required - user must be an admin of the fundraiser's organization.
+
+### Path Parameters
+
+<ParamField path="id" type="string (uuid)" required>
+  Fundraiser ID
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Analytics retrieved"
+</ResponseField>
+
+<ResponseField name="data" type="Analytics">
+  Analytics object with fundraiser metrics
+</ResponseField>
+
+---
+
+## Create Fundraiser Item
+
+**POST** `/api/fundraiser/:id/items/create`
+
+Adds an item to a fundraiser.
+
+### Authentication
+
+Required - user must be an admin of the fundraiser's organization.
+
+### Path Parameters
+
+<ParamField path="id" type="string (uuid)" required>
+  Fundraiser ID
+</ParamField>
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Item name (1-255 characters)
+</ParamField>
+
+<ParamField body="description" type="string" required>
+  Item description
+</ParamField>
+
+<ParamField body="price" type="string (decimal)" required>
+  Item price (non-negative, max 2 decimals)
+</ParamField>
+
+<ParamField body="offsale" type="boolean" required>
+  Whether item is unavailable for purchase
+</ParamField>
+
+<ParamField body="imageUrl" type="string (url)" optional>
+  Item image URL
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Successfully created fundraiser item"
+</ResponseField>
+
+<ResponseField name="data" type="Item">
+  Created item object
+</ResponseField>
+
+---
+
+## Update Fundraiser Item
+
+**POST** `/api/fundraiser/:fundraiserId/items/:itemId/update`
+
+Updates an existing item.
+
+### Authentication
+
+Required - user must be an admin of the fundraiser's organization.
+
+### Path Parameters
+
+<ParamField path="fundraiserId" type="string (uuid)" required>
+  Fundraiser ID
+</ParamField>
+
+<ParamField path="itemId" type="string (uuid)" required>
+  Item ID
+</ParamField>
+
+### Request Body
+
+Same as Create Item. **Note:** Price cannot be changed if fundraiser is published.
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Successfully updated fundraiser item"
+</ResponseField>
+
+<ResponseField name="data" type="Item">
+  Updated item object
+</ResponseField>
+
+---
+
+## Delete Fundraiser Item
+
+**DELETE** `/api/fundraiser/:fundraiserId/items/:itemId/delete`
+
+Deletes an item from a fundraiser. Only allowed if fundraiser is unpublished.
+
+### Authentication
+
+Required - user must be an admin of the fundraiser's organization.
+
+### Path Parameters
+
+<ParamField path="fundraiserId" type="string (uuid)" required>
+  Fundraiser ID
+</ParamField>
+
+<ParamField path="itemId" type="string (uuid)" required>
+  Item ID
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Successfully deleted fundraiser item"
+</ResponseField>
+
+---
+
+## Create Announcement
+
+**POST** `/api/fundraiser/:id/announcements/create`
+
+Creates an announcement and emails all buyers.
+
+### Authentication
+
+Required - user must be an admin of the fundraiser's organization.
+
+### Path Parameters
+
+<ParamField path="id" type="string (uuid)" required>
+  Fundraiser ID
+</ParamField>
+
+### Request Body
+
+<ParamField body="message" type="string" required>
+  Announcement message content
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Successfully created announcement"
+</ResponseField>
+
+<ResponseField name="data" type="Announcement">
+  Created announcement object
+</ResponseField>
+
+---
+
+## Delete Announcement
+
+**DELETE** `/api/fundraiser/:fundraiserId/announcements/:announcementId/delete`
+
+Deletes an announcement.
+
+### Authentication
+
+Required - user must be an admin of the fundraiser's organization.
+
+### Path Parameters
+
+<ParamField path="fundraiserId" type="string (uuid)" required>
+  Fundraiser ID (lowercase in route)
+</ParamField>
+
+<ParamField path="announcementId" type="string (uuid)" required>
+  Announcement ID (lowercase in route)
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Successfully deleted announcement"
+</ResponseField>
+
+---
+
+## Create Pickup Event
+
+**POST** `/api/fundraiser/:id/pickup-events/create`
+
+Adds a pickup event to a fundraiser.
+
+### Authentication
+
+Required - user must be an admin of the fundraiser's organization.
+
+### Path Parameters
+
+<ParamField path="id" type="string (uuid)" required>
+  Fundraiser ID
+</ParamField>
+
+### Request Body
+
+<ParamField body="startsAt" type="string (date)" required>
+  Event start time (ISO 8601)
+</ParamField>
+
+<ParamField body="endsAt" type="string (date)" required>
+  Event end time (ISO 8601)
+</ParamField>
+
+<ParamField body="location" type="string" required>
+  Pickup location description
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Successfully created pickup event"
+</ResponseField>
+
+<ResponseField name="data" type="PickupEvent">
+  Created pickup event object
+</ResponseField>
+
+---
+
+## Update Pickup Event
+
+**POST** `/api/fundraiser/:fundraiserId/pickup-events/:pickupEventId/update`
+
+Updates an existing pickup event.
+
+### Authentication
+
+Required - user must be an admin of the fundraiser's organization.
+
+### Path Parameters
+
+<ParamField path="fundraiserId" type="string (uuid)" required>
+  Fundraiser ID
+</ParamField>
+
+<ParamField path="pickupEventId" type="string (uuid)" required>
+  Pickup Event ID
+</ParamField>
+
+### Request Body
+
+Same as Create Pickup Event.
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Successfully updated pickup event"
+</ResponseField>
+
+<ResponseField name="data" type="PickupEvent">
+  Updated pickup event object
+</ResponseField>
+
+---
+
+## Delete Pickup Event
+
+**DELETE** `/api/fundraiser/:fundraiserId/pickup-events/:pickupEventId/delete`
+
+Deletes a pickup event. Fundraiser must have at least one pickup event remaining.
+
+### Authentication
+
+Required - user must be an admin of the fundraiser's organization.
+
+### Path Parameters
+
+<ParamField path="fundraiserId" type="string (uuid)" required>
+  Fundraiser ID
+</ParamField>
+
+<ParamField path="pickupEventId" type="string (uuid)" required>
+  Pickup Event ID
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Successfully deleted pickup event"
+</ResponseField>
+
+---
+
+## Create Referral
+
+**POST** `/api/fundraiser/:id/referrals`
+
+Creates a referral request for a published fundraiser.
+
+### Authentication
+
+Required.
+
+### Path Parameters
+
+<ParamField path="id" type="string (uuid)" required>
+  Fundraiser ID
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Referral request created"
+</ResponseField>
+
+<ResponseField name="data" type="Referral">
+  Created referral object (approved: false)
+</ResponseField>
+
+---
+
+## Approve Referral
+
+**POST** `/api/fundraiser/:fundraiserId/referrals/:referralId/approve`
+
+Approves a referral request (admin only).
+
+### Authentication
+
+Required - user must be an admin of the fundraiser's organization.
+
+### Path Parameters
+
+<ParamField path="fundraiserId" type="string (uuid)" required>
+  Fundraiser ID
+</ParamField>
+
+<ParamField path="referralId" type="string (uuid)" required>
+  Referral ID
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Referral approved"
+</ResponseField>
+
+<ResponseField name="data" type="Referral">
+  Updated referral with approved: true
+</ResponseField>
+
+---
+
+## Delete Referral
+
+**DELETE** `/api/fundraiser/:fundraiserId/referrals/:referralId/delete`
+
+Deletes a referral (admin only).
+
+### Authentication
+
+Required - user must be an admin of the fundraiser's organization.
+
+### Path Parameters
+
+<ParamField path="fundraiserId" type="string (uuid)" required>
+  Fundraiser ID
+</ParamField>
+
+<ParamField path="referralId" type="string (uuid)" required>
+  Referral ID
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Referral deleted successfully"
+</ResponseField>

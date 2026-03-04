@@ -1,0 +1,539 @@
+---
+title: "Authentication Flow"
+description: "How Supabase Auth, JWT validation, and protected routes work in CURaise"
+---
+
+## Overview
+
+CURaise uses **Supabase Auth** for authentication with a JWT-based flow:
+
+<Steps>
+  <Step title="User Login">
+    User authenticates via Supabase (email/password, OAuth, etc.)
+  </Step>
+  <Step title="JWT Storage">
+    Supabase returns a JWT access token, stored in the browser
+  </Step>
+  <Step title="Authenticated Requests">
+    Frontend sends JWT in `Authorization: Bearer {token}` header
+  </Step>
+  <Step title="Backend Validation">
+    Backend middleware validates JWT using Supabase service role key
+  </Step>
+  <Step title="User Attachment">
+    Authenticated user object attached to `res.locals.user` for handlers
+  </Step>
+</Steps>
+
+## Backend: JWT Validation Middleware
+
+### authenticate.ts
+
+Validates JWT tokens and requires authentication:
+
+```typescript backend/src/middleware/authenticate.ts
+import { createClient } from "@supabase/supabase-js";
+import { NextFunction, Request, Response } from "express-serve-static-core";
+
+const supabase = createClient(
+  process.env.SUPABASE_URL as string,
+  process.env.SUPABASE_SERVICE_KEY as string  // Service role key!
+);
+
+export const authenticate = async <ParamsT, BodyT, QueryT>(
+  req: Request<ParamsT, any, BodyT, QueryT>,
+  res: Response,
+  next: NextFunction
+) => {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser(
+    req.headers.authorization?.split("Bearer ")[1]
+  );
+
+  if (!user) {
+    res.status(401).json({ message: "Invalid authorization token" });
+    return;
+  }
+
+  res.locals.user = user;  // Attach user to response object
+  next();
+};
+```
+
+<Warning>
+  The backend must use the **service role key** (not the anon key) to validate JWTs. This key has admin privileges and should **never** be exposed to the frontend.
+</Warning>
+
+### authenticateOptional.ts
+
+Allows requests with or without authentication:
+
+```typescript backend/src/middleware/authenticateOptional.ts
+export const authenticateOptional = async <ParamsT, BodyT, QueryT>(
+  req: Request<ParamsT, any, BodyT, QueryT>,
+  res: Response,
+  next: NextFunction
+) => {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser(
+    req.headers.authorization?.split("Bearer ")[1]
+  );
+
+  if (user) {
+    res.locals.user = user;  // Attach user only if valid token provided
+  }
+
+  next();  // Continue even if no user
+};
+```
+
+**Use case**: Endpoints that return different data for authenticated vs. anonymous users (e.g., showing "My Organizations" only to logged-in users).
+
+### Using Middleware in Routes
+
+```typescript backend/src/api/user/user.router.ts
+import { Router } from "express";
+import { authenticate } from "../../middleware/authenticate";
+import validate from "../../middleware/validate";
+import { getUserHandler, updateUserHandler } from "./user.handlers";
+import { UserRouteParams, UpdateUserBody } from "common";
+
+const userRouter = Router();
+
+// Public route - no authentication required
+userRouter.get(
+  "/:id",
+  validate({ params: UserRouteParams }),
+  asyncHandler(getUserHandler)
+);
+
+// Protected route - requires JWT
+userRouter.post(
+  "/:id",
+  validate({ params: UserRouteParams, body: UpdateUserBody }),
+  authenticate,  // JWT validation middleware
+  asyncHandler(updateUserHandler)
+);
+
+export default userRouter;
+```
+
+### Accessing Authenticated User in Handlers
+
+```typescript backend/src/api/user/user.handlers.ts
+import { Response } from "express-serve-static-core";
+import { User } from "@supabase/supabase-js";
+
+export const updateUserHandler = async (
+  req: Request<UserRouteParams, any, UpdateUserBody>,
+  res: Response
+) => {
+  const authenticatedUser = res.locals.user as User;  // Set by authenticate middleware
+  const { id } = req.params;
+
+  // Authorization check: ensure user can only update their own profile
+  if (authenticatedUser.id !== id) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  const updatedUser = await updateUser({
+    userId: id,
+    ...req.body,
+  });
+
+  return res.json({ message: "User updated", data: updatedUser });
+};
+```
+
+## Frontend: Fetcher Pattern
+
+### authFetcher
+
+Automatically attaches JWT to requests:
+
+```typescript frontend/src/lib/fetcher.ts
+import { createClient } from "@/utils/supabase/client";
+import { z } from "zod";
+
+const supabase = createClient();
+
+export const authFetcher =
+  <T extends z.ZodTypeAny>(schema: T) =>
+  async (url: string): Promise<z.infer<T>> => {
+    const {
+      data: { session },
+      error,
+    } = await supabase.auth.getSession();
+
+    if (error || !session?.access_token) {
+      throw new Error("Session invalid");
+    }
+
+    const response = await fetch(process.env.NEXT_PUBLIC_API_URL! + url, {
+      headers: {
+        Authorization: "Bearer " + session.access_token,  // Attach JWT
+      },
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.message);
+    }
+
+    const data = schema.safeParse(result.data);
+    if (!data.success) {
+      throw new Error("Could not parse data");
+    }
+    return data.data;
+  };
+```
+
+### Usage with SWR
+
+<Tabs>
+  <Tab title="Authenticated Request">
+    ```typescript
+    import useSWR from "swr";
+    import { authFetcher } from "@/lib/fetcher";
+    import { CompleteUserSchema } from "common";
+
+    export default function UserProfile({ userId }: { userId: string }) {
+      const { data, error, isLoading } = useSWR(
+        `/user/${userId}`,
+        authFetcher(CompleteUserSchema)
+      );
+
+      if (isLoading) return <div>Loading...</div>;
+      if (error) return <div>Error: {error.message}</div>;
+
+      return <div>Welcome, {data.name}!</div>;
+    }
+    ```
+  </Tab>
+
+  <Tab title="Public Request">
+    ```typescript
+    import { noAuthFetcher } from "@/lib/fetcher";
+    import { CompleteFundraiserSchema } from "common";
+
+    const { data } = useSWR(
+      `/fundraiser/${fundraiserId}`,
+      noAuthFetcher(CompleteFundraiserSchema)
+    );
+    ```
+  </Tab>
+</Tabs>
+
+### Mutations (POST/PUT/DELETE)
+
+```typescript
+import { mutationFetch } from "@/lib/fetcher";
+import { createClient } from "@/utils/supabase/client";
+
+const supabase = createClient();
+
+async function updateUserName(userId: string, name: string) {
+  const { data: { session } } = await supabase.auth.getSession();
+
+  if (!session?.access_token) {
+    throw new Error("Not authenticated");
+  }
+
+  const result = await mutationFetch(`/user/${userId}`, {
+    method: "POST",
+    token: session.access_token,
+    body: { name },
+  });
+
+  return result;
+}
+```
+
+## Frontend: Protected Routes
+
+### Next.js Middleware
+
+Protects `/buyer/**` and `/seller/**` routes:
+
+```typescript frontend/src/middleware.ts
+import { createServerClient } from "@supabase/ssr";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+
+export async function middleware(request: NextRequest) {
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get: (name) => request.cookies.get(name)?.value,
+      },
+    }
+  );
+
+  const { data: { user } } = await supabase.auth.getUser();
+
+  // Redirect to login if not authenticated
+  if (!user) {
+    return NextResponse.redirect(new URL("/auth/login", request.url));
+  }
+
+  return NextResponse.next();
+}
+
+export const config = {
+  matcher: ['/buyer/:path*', '/seller/:path*'],  // Protected routes
+};
+```
+
+## Environment Variables
+
+### Backend (.env.dev)
+
+```bash
+SUPABASE_URL="https://your-project.supabase.co"
+SUPABASE_SERVICE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."  # Service role key
+```
+
+<Warning>
+  **Never commit** the service role key to version control. It has admin privileges.
+</Warning>
+
+### Frontend (.env.dev)
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL="https://your-project.supabase.co"
+NEXT_PUBLIC_SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."  # Anon key (public)
+```
+
+<Info>
+  The **anon key** is safe to expose in the browser. It has limited permissions defined by Supabase Row Level Security (RLS).
+</Info>
+
+## Authentication Flow Diagram
+
+<Tabs>
+  <Tab title="Login Flow">
+    ```mermaid
+    sequenceDiagram
+      participant User
+      participant Frontend
+      participant Supabase
+      participant Backend
+
+      User->>Frontend: Enter credentials
+      Frontend->>Supabase: signInWithPassword()
+      Supabase->>Frontend: JWT access token
+      Frontend->>Frontend: Store JWT in session
+    ```
+  </Tab>
+
+  <Tab title="Authenticated Request">
+    ```mermaid
+    sequenceDiagram
+      participant Frontend
+      participant Backend
+      participant Supabase
+      participant Database
+
+      Frontend->>Frontend: Get JWT from session
+      Frontend->>Backend: Request + Authorization: Bearer {JWT}
+      Backend->>Supabase: Validate JWT
+      Supabase->>Backend: User object
+      Backend->>Database: Query with user context
+      Database->>Backend: Data
+      Backend->>Frontend: { message, data }
+    ```
+  </Tab>
+</Tabs>
+
+## Authorization Patterns
+
+### User-Specific Resources
+
+Ensure users can only access their own data:
+
+```typescript backend/src/api/order/order.handlers.ts
+export const getOrderHandler = async (req, res) => {
+  const authenticatedUser = res.locals.user as User;
+  const { orderId } = req.params;
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+  });
+
+  if (!order) {
+    return res.status(404).json({ message: "Order not found" });
+  }
+
+  // Authorization: only the buyer can view their order
+  if (order.buyerId !== authenticatedUser.id) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  return res.json({ message: "Order retrieved", data: order });
+};
+```
+
+### Organization Admin Check
+
+Verify user is an admin of the organization:
+
+```typescript backend/src/api/fundraiser/fundraiser.handlers.ts
+export const updateFundraiserHandler = async (req, res) => {
+  const authenticatedUser = res.locals.user as User;
+  const { id } = req.params;
+
+  const fundraiser = await prisma.fundraiser.findUnique({
+    where: { id },
+    include: { organization: { include: { admins: true } } },
+  });
+
+  if (!fundraiser) {
+    return res.status(404).json({ message: "Fundraiser not found" });
+  }
+
+  // Check if user is an admin of the organization
+  const isAdmin = fundraiser.organization.admins.some(
+    (admin) => admin.id === authenticatedUser.id
+  );
+
+  if (!isAdmin) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  // Proceed with update...
+};
+```
+
+## User Registration Flow
+
+### 1. Create Supabase Auth User
+
+```typescript frontend/src/app/auth/signup/page.tsx
+import { createClient } from "@/utils/supabase/client";
+
+const supabase = createClient();
+
+const { data, error } = await supabase.auth.signUp({
+  email: "user@example.com",
+  password: "securepassword",
+});
+```
+
+### 2. Create Database User Record
+
+After Supabase user is created, create corresponding `User` record:
+
+```typescript backend/src/api/user/user.handlers.ts
+import { prisma } from "../../utils/prisma";
+
+export const createUserHandler = async (req, res) => {
+  const authenticatedUser = res.locals.user as User;  // From Supabase
+
+  // Create user in database with same ID as Supabase user
+  const user = await prisma.user.create({
+    data: {
+      id: authenticatedUser.id,  // Must match Supabase user ID
+      email: authenticatedUser.email!,
+      name: req.body.name,
+    },
+  });
+
+  return res.json({ message: "User created", data: user });
+};
+```
+
+<Note>
+  The `User.id` in the database **must match** the Supabase Auth user ID for JWT validation to work correctly.
+</Note>
+
+## Security Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Never Expose Service Key" icon="lock">
+    The `SUPABASE_SERVICE_KEY` has admin privileges. Only use it on the backend.
+  </Card>
+
+  <Card title="Always Validate Authorization" icon="shield">
+    Even if a user is authenticated, verify they have permission to access the requested resource.
+  </Card>
+
+  <Card title="Use HTTPS in Production" icon="globe">
+    JWTs are sensitive. Always use HTTPS to prevent token interception.
+  </Card>
+
+  <Card title="Handle Token Expiration" icon="clock">
+    Supabase tokens expire after 1 hour. Use `refreshSession()` to get a new token:
+
+    ```typescript
+    const { data, error } = await supabase.auth.refreshSession();
+    ```
+  </Card>
+</CardGroup>
+
+## Common Authentication Errors
+
+<AccordionGroup>
+  <Accordion title="401 Unauthorized - Invalid authorization token">
+    **Causes**:
+    - JWT token is missing or malformed
+    - Token has expired (> 1 hour old)
+    - Wrong service key in backend `.env`
+
+    **Solution**:
+    - Check that `Authorization: Bearer {token}` header is present
+    - Refresh the session: `await supabase.auth.refreshSession()`
+    - Verify `SUPABASE_SERVICE_KEY` in backend `.env.dev`
+  </Accordion>
+
+  <Accordion title="403 Forbidden">
+    **Causes**:
+    - User is authenticated but not authorized to access the resource
+    - User is not an admin of the organization
+
+    **Solution**:
+    - Check authorization logic in handler
+    - Ensure user ID matches resource owner
+    - Verify organization admin relationship
+  </Accordion>
+
+  <Accordion title="Session invalid error in frontend">
+    **Causes**:
+    - User is not logged in
+    - Session has expired
+
+    **Solution**:
+    - Redirect to `/auth/login`
+    - Check Supabase session: `await supabase.auth.getSession()`
+  </Accordion>
+</AccordionGroup>
+
+## Testing Authentication
+
+### Get JWT Token for Testing
+
+```typescript
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
+const { data, error } = await supabase.auth.signInWithPassword({
+  email: "test@example.com",
+  password: "testpassword",
+});
+
+const token = data.session?.access_token;
+console.log("JWT Token:", token);
+```
+
+### Test Protected Endpoint with cURL
+
+```bash
+curl -X GET http://localhost:3000/user/123 \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```

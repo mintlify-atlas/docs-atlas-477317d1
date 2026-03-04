@@ -1,0 +1,243 @@
+---
+title: 'Organization Setup'
+description: 'Create and configure your organization to start running fundraisers on CURaise'
+icon: 'building'
+---
+
+## Overview
+
+Organizations are the foundation of CURaise. Each organization can run multiple fundraisers and have multiple administrators managing them. Before creating fundraisers, you need to set up your organization and get it authorized.
+
+<Note>
+  All organizations require authorization from CURaise administrators before they can publish fundraisers. This ensures quality and prevents misuse of the platform.
+</Note>
+
+## Creating an Organization
+
+<Steps>
+  <Step title="Navigate to Create Organization">
+    Go to `/seller/org/create` to start the organization creation process.
+  </Step>
+  
+  <Step title="Fill Basic Information">
+    Provide the essential details about your organization:
+    
+    <ParamField path="name" type="string" required>
+      Organization name (1-255 characters, must be unique)
+      
+      ```typescript
+      z.string().min(1).max(255)
+      ```
+    </ParamField>
+    
+    <ParamField path="description" type="string" required>
+      A description of your organization's mission and activities
+    </ParamField>
+    
+    <ParamField path="websiteUrl" type="string">
+      Your organization's website (must be a valid URL)
+      
+      ```typescript
+      z.string().url().optional()
+      ```
+    </ParamField>
+    
+    <ParamField path="instagramUsername" type="string">
+      Instagram handle without the @ symbol (1-30 characters)
+      
+      ```typescript
+      z.string().min(1).max(30).optional()
+      ```
+    </ParamField>
+  </Step>
+  
+  <Step title="Add Organization Administrators">
+    Invite other users to help manage your organization:
+    
+    <ParamField path="addedAdminsEmails" type="string[]" required>
+      Array of email addresses for administrators. Users can be:
+      - **Existing users**: Automatically connected as admins
+      - **New users**: Added as pending admins until they create an account
+      
+      ```typescript
+      z.array(z.string().email())
+      ```
+    </ParamField>
+    
+    <Info>
+      The organization creator is automatically added as an admin. Use this field to add additional administrators.
+    </Info>
+  </Step>
+  
+  <Step title="Upload Organization Logo">
+    Add a logo image to represent your organization (optional but recommended):
+    
+    <ParamField path="logoUrl" type="string">
+      URL of your organization's logo image
+      
+      ```typescript
+      z.string().url().optional()
+      ```
+    </ParamField>
+  </Step>
+  
+  <Step title="Review and Submit">
+    Review all information and submit your organization for creation.
+  </Step>
+</Steps>
+
+## Database Schema
+
+Organizations are stored with the following structure:
+
+```prisma
+model Organization {
+  id                String   @id @default(uuid()) @db.Uuid
+  name              String   @unique
+  description       String
+  authorized        Boolean  @default(false)
+  logoUrl           String?  @map("logo_url")
+  websiteUrl        String?  @map("website_url")
+  instagramUsername String?  @map("instagram_username")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  admins        User[]
+  pendingAdmins PendingUser[]
+  fundraisers   Fundraiser[]
+}
+```
+
+## Authorization Process
+
+<Warning>
+  New organizations have `authorized: false` by default. You cannot publish fundraisers until your organization is authorized.
+</Warning>
+
+### Authorization Status
+
+The `authorized` field determines whether your organization can:
+- ✅ **Authorized (`true`)**: Publish fundraisers and accept orders
+- ❌ **Not Authorized (`false`)**: Create draft fundraisers but cannot publish them
+
+### Getting Authorized
+
+1. Submit your organization with complete, accurate information
+2. CURaise administrators will review your organization
+3. Once approved, `authorized` is set to `true`
+4. You'll receive a notification when your organization is authorized
+
+## Managing Organization Settings
+
+After creation, you can update your organization settings:
+
+### Updating Organization Details
+
+```typescript
+// API Endpoint: PUT /organization/:id
+interface UpdateOrganizationBody {
+  name: string;                    // 1-255 characters
+  description: string;
+  logoUrl?: string;                // Valid URL
+  websiteUrl?: string;             // Valid URL
+  instagramUsername?: string;      // 1-30 characters
+  addedAdminsEmails: string[];     // Appends new admins
+}
+```
+
+<Info>
+  The `addedAdminsEmails` field **appends** new administrators - it doesn't replace existing ones.
+</Info>
+
+### Managing Admins
+
+**Organization admins can:**
+- Create and manage fundraisers
+- Add items to fundraisers
+- Process orders
+- View analytics
+- Manage referral programs
+
+**Adding admins:**
+- Enter email addresses in the organization settings
+- If the user exists, they're added immediately
+- If the user doesn't exist, they're added as a `PendingUser` and automatically become an admin when they sign up
+
+## API Reference
+
+### Create Organization
+
+```typescript
+POST /organization
+
+Body: CreateOrganizationBody & { creatorId: string }
+
+Response: {
+  message: string;
+  data: Organization & {
+    admins: User[];
+    pendingAdmins: PendingUser[];
+  };
+}
+```
+
+### Get Organization
+
+```typescript
+GET /organization/:organizationId
+
+Response: {
+  message: string;
+  data: Organization & {
+    admins: User[];
+  };
+}
+```
+
+### Update Organization
+
+```typescript
+PUT /organization/:organizationId
+
+Body: UpdateOrganizationBody
+
+Response: {
+  message: string;
+  data: Organization & {
+    admins: User[];
+    pendingAdmins: PendingUser[];
+  };
+}
+```
+
+## Common Issues
+
+<AccordionGroup>
+  <Accordion title="My organization is not authorized yet">
+    Organizations must be manually authorized by CURaise administrators. This typically takes 1-2 business days. You can still create draft fundraisers while waiting for authorization.
+  </Accordion>
+  
+  <Accordion title="Can't add an admin with a specific email">
+    Make sure:
+    - The email is valid and properly formatted
+    - You haven't already added this email as an admin
+    - The email domain is allowed (check with CURaise support for domain restrictions)
+  </Accordion>
+  
+  <Accordion title="Organization name is already taken">
+    Organization names must be unique across the platform. Try adding a qualifier or using your full official name.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+Once your organization is set up:
+
+<CardGroup cols={2}>
+  <Card title="Create Fundraisers" icon="hand-holding-heart" href="/seller/creating-fundraisers">
+    Set up your first fundraising campaign
+  </Card>
+  
+  <Card title="Add Items" icon="box" href="/seller/managing-items">
+    Add products to your fundraiser
+  </Card>
+</CardGroup>

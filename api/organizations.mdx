@@ -1,0 +1,485 @@
+---
+title: Organizations API
+description: Manage fundraising organizations
+---
+
+## Get Organization
+
+<CodeGroup>
+```bash cURL
+curl https://api.curaise.com/api/organization/123e4567-e89b-12d3-a456-426614174000
+```
+
+```typescript TypeScript
+const response = await fetch(
+  'https://api.curaise.com/api/organization/123e4567-e89b-12d3-a456-426614174000'
+)
+const data = await response.json()
+```
+</CodeGroup>
+
+**GET** `/api/organization/:id`
+
+Retrieves detailed information about an organization.
+
+### Authentication
+
+Public endpoint - no authentication required.
+
+### Path Parameters
+
+<ParamField path="id" type="string (uuid)" required>
+  Organization ID
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Organization retrieved"
+</ResponseField>
+
+<ResponseField name="data" type="CompleteOrganization">
+  Complete organization object
+  
+  <Expandable title="CompleteOrganization">
+    <ResponseField name="id" type="string (uuid)">
+      Organization ID
+    </ResponseField>
+    
+    <ResponseField name="name" type="string">
+      Organization name (1-255 characters)
+    </ResponseField>
+    
+    <ResponseField name="description" type="string">
+      Organization description
+    </ResponseField>
+    
+    <ResponseField name="authorized" type="boolean">
+      Whether organization is verified/authorized
+    </ResponseField>
+    
+    <ResponseField name="logoUrl" type="string | null">
+      URL to organization logo image
+    </ResponseField>
+    
+    <ResponseField name="websiteUrl" type="string | null">
+      Organization website URL
+    </ResponseField>
+    
+    <ResponseField name="instagramUsername" type="string | null">
+      Instagram handle (1-30 characters, without @)
+    </ResponseField>
+    
+    <ResponseField name="admins" type="User[]">
+      Array of admin users
+      <Expandable title="User">
+        <ResponseField name="id" type="string (uuid)">
+          User ID
+        </ResponseField>
+        <ResponseField name="email" type="string">
+          User email
+        </ResponseField>
+        <ResponseField name="name" type="string">
+          User full name
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## Get Organization Fundraisers
+
+<CodeGroup>
+```bash cURL
+curl https://api.curaise.com/api/organization/123e4567-e89b-12d3-a456-426614174000/fundraisers
+```
+
+```typescript TypeScript
+// Public request - only published fundraisers
+const response = await fetch(
+  'https://api.curaise.com/api/organization/123e4567-e89b-12d3-a456-426614174000/fundraisers'
+)
+
+// Authenticated admin request - includes unpublished
+const response = await fetch(
+  'https://api.curaise.com/api/organization/123e4567-e89b-12d3-a456-426614174000/fundraisers',
+  {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  }
+)
+```
+</CodeGroup>
+
+**GET** `/api/organization/:id/fundraisers`
+
+Retrieves all fundraisers for an organization.
+
+### Authentication
+
+Optional - behavior changes based on authentication:
+- **Unauthenticated:** Only published fundraisers returned
+- **Authenticated as admin:** All fundraisers (published and unpublished) returned
+- **Authenticated as non-admin:** Only published fundraisers returned
+
+### Path Parameters
+
+<ParamField path="id" type="string (uuid)" required>
+  Organization ID
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Fundraisers retrieved"
+</ResponseField>
+
+<ResponseField name="data" type="Fundraiser[]">
+  Array of fundraiser objects (BasicFundraiserSchema)
+</ResponseField>
+
+---
+
+## Create Organization
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.curaise.com/api/organization/create \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Campus Food Bank",
+    "description": "Student-run organization fighting food insecurity on campus",
+    "logoUrl": "https://example.com/logo.png",
+    "websiteUrl": "https://campusfoodbank.org",
+    "instagramUsername": "campusfoodbank",
+    "addedAdminsEmails": [
+      "admin1@example.com",
+      "admin2@example.com"
+    ]
+  }'
+```
+
+```typescript TypeScript
+const response = await fetch('https://api.curaise.com/api/organization/create', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    name: 'Campus Food Bank',
+    description: 'Student-run organization fighting food insecurity on campus',
+    logoUrl: 'https://example.com/logo.png',
+    websiteUrl: 'https://campusfoodbank.org',
+    instagramUsername: 'campusfoodbank',
+    addedAdminsEmails: [
+      'admin1@example.com',
+      'admin2@example.com'
+    ]
+  })
+})
+const data = await response.json()
+```
+</CodeGroup>
+
+**POST** `/api/organization/create`
+
+Creates a new organization. The authenticated user automatically becomes an admin.
+
+### Authentication
+
+Required - authenticated user becomes the creator and first admin.
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Organization name (1-255 characters)
+</ParamField>
+
+<ParamField body="description" type="string" required>
+  Detailed organization description
+</ParamField>
+
+<ParamField body="addedAdminsEmails" type="string[]" required>
+  Array of email addresses to invite as admins. Invitation emails sent automatically.
+</ParamField>
+
+<ParamField body="logoUrl" type="string (url)" optional>
+  URL to organization logo image
+</ParamField>
+
+<ParamField body="websiteUrl" type="string (url)" optional>
+  Organization website URL. Empty strings converted to undefined.
+</ParamField>
+
+<ParamField body="instagramUsername" type="string" optional>
+  Instagram handle without @ symbol (1-30 characters). Empty strings converted to undefined.
+</ParamField>
+
+### Admin Invitation Flow
+
+When creating an organization:
+1. System checks each email in `addedAdminsEmails`
+2. **If user exists:** Send invitation email to existing user
+3. **If user doesn't exist:** Create PendingUser record and send signup invitation
+4. Admins can accept invitation by logging in (or signing up)
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Organization created"
+</ResponseField>
+
+<ResponseField name="data" type="Organization">
+  Created organization object (BasicOrganizationSchema)
+  
+  **Note:** `authorized` will be `false` initially. CURaise team reviews and authorizes organizations manually.
+</ResponseField>
+
+**Status Code:** `200 OK`
+
+---
+
+## Update Organization
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.curaise.com/api/organization/123e4567-e89b-12d3-a456-426614174000/update \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Campus Food Bank (Updated)",
+    "description": "Updated description",
+    "logoUrl": "https://example.com/new-logo.png",
+    "websiteUrl": "https://newfoodbank.org",
+    "instagramUsername": "newcampusfoodbank",
+    "addedAdminsEmails": [
+      "newadmin@example.com"
+    ]
+  }'
+```
+
+```typescript TypeScript
+const response = await fetch(
+  'https://api.curaise.com/api/organization/123e4567-e89b-12d3-a456-426614174000/update',
+  {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      name: 'Campus Food Bank (Updated)',
+      description: 'Updated description',
+      logoUrl: 'https://example.com/new-logo.png',
+      websiteUrl: 'https://newfoodbank.org',
+      instagramUsername: 'newcampusfoodbank',
+      addedAdminsEmails: ['newadmin@example.com']
+    })
+  }
+)
+const data = await response.json()
+```
+</CodeGroup>
+
+**POST** `/api/organization/:id/update`
+
+Updates an existing organization.
+
+### Authentication
+
+Required - user must be an admin of the organization.
+
+### Path Parameters
+
+<ParamField path="id" type="string (uuid)" required>
+  Organization ID
+</ParamField>
+
+### Request Body
+
+Same fields as Create Organization.
+
+<ParamField body="name" type="string" required>
+  Organization name (1-255 characters)
+</ParamField>
+
+<ParamField body="description" type="string" required>
+  Detailed organization description
+</ParamField>
+
+<ParamField body="addedAdminsEmails" type="string[]" required>
+  **Appends** additional admins (doesn't replace existing). Invitation emails sent to new admins.
+</ParamField>
+
+<ParamField body="logoUrl" type="string (url)" optional>
+  URL to organization logo image
+</ParamField>
+
+<ParamField body="websiteUrl" type="string (url)" optional>
+  Organization website URL
+</ParamField>
+
+<ParamField body="instagramUsername" type="string" optional>
+  Instagram handle (1-30 characters, without @)
+</ParamField>
+
+### Important Notes
+
+**Adding Admins:**
+- `addedAdminsEmails` appends new admins, doesn't replace existing ones
+- To remove admins, use database operations (not supported via API currently)
+- Existing admins are not affected by update operations
+
+### Response
+
+<ResponseField name="message" type="string">
+  "Organization updated"
+</ResponseField>
+
+<ResponseField name="data" type="CompleteOrganization">
+  Updated organization object with all admins
+</ResponseField>
+
+---
+
+## Authorization Requirements
+
+All organization modifications require admin status:
+
+### Creating Fundraisers
+
+To create a fundraiser for an organization, the authenticated user must be in the organization's `admins` array.
+
+### Updating Organization
+
+Only existing admins can update organization details or add new admins.
+
+### Viewing Unpublished Fundraisers
+
+Only admins can see unpublished fundraisers via `GET /api/organization/:id/fundraisers`.
+
+---
+
+## Organization Workflow
+
+### 1. Create Organization
+
+```typescript
+POST /api/organization/create
+{
+  name: "My Organization",
+  description: "...",
+  addedAdminsEmails: ["admin@example.com"]
+}
+```
+
+**Result:**
+- Organization created with `authorized: false`
+- Creator becomes first admin
+- Invitation emails sent to additional admins
+- PendingUser records created for non-existent emails
+
+### 2. CURaise Team Reviews
+
+Internal process - organization verification:
+- CURaise team reviews organization details
+- Manual database update sets `authorized: true`
+- No API endpoint for authorization currently
+
+### 3. Create Fundraisers
+
+Once authorized, admins can create fundraisers:
+
+```typescript
+POST /api/fundraiser/create
+{
+  organizationId: "org-uuid",
+  // ... fundraiser details
+}
+```
+
+### 4. Add More Admins
+
+Existing admins can invite additional admins:
+
+```typescript
+POST /api/organization/:id/update
+{
+  // ... existing fields
+  addedAdminsEmails: ["newadmin@example.com"]
+}
+```
+
+---
+
+## Error Responses
+
+### 403 Forbidden - Not an Admin
+
+```json
+{
+  "message": "Unauthorized to update organization"
+}
+```
+
+Returned when user is not in the organization's admins list.
+
+### 404 Not Found
+
+```json
+{
+  "message": "Organization not found"
+}
+```
+
+### 500 Internal Server Error - Creator Not Found
+
+```json
+{
+  "message": "Creator user not found"
+}
+```
+
+Rare error when authenticated user doesn't exist in database.
+
+---
+
+## Schema Validation
+
+### URL Transformations
+
+Empty strings for optional URL fields are automatically converted to `undefined`:
+
+```typescript
+// Input
+{
+  websiteUrl: "",  // Empty string
+  instagramUsername: ""
+}
+
+// Transformed to
+{
+  websiteUrl: undefined,
+  instagramUsername: undefined
+}
+```
+
+### Instagram Username Validation
+
+- Length: 1-30 characters
+- Do NOT include @ symbol
+- Empty strings converted to undefined
+
+**Valid:**
+- `"campusfoodbank"`
+- `"food_bank_2026"`
+
+**Invalid:**
+- `"@campusfoodbank"` (no @ symbol)
+- `""` (empty - converted to undefined)
+- `"this_username_is_way_too_long_for_instagram"` (>30 chars)

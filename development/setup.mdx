@@ -1,0 +1,453 @@
+---
+title: "Development Setup"
+description: "Get CURaise running locally with this step-by-step guide"
+---
+
+## Prerequisites
+
+Before setting up CURaise, ensure you have the following installed:
+
+<CardGroup cols={3}>
+  <Card title="Node.js" icon="node">
+    Version 18 or higher
+  </Card>
+  <Card title="pnpm" icon="box">
+    Fast, disk space efficient package manager
+  </Card>
+  <Card title="PostgreSQL" icon="database">
+    For local database (or use Supabase)
+  </Card>
+</CardGroup>
+
+### Installing pnpm
+
+If you don't have pnpm installed:
+
+<CodeGroup>
+```bash macOS/Linux
+curl -fsSL https://get.pnpm.io/install.sh | sh -
+```
+
+```bash Windows (PowerShell)
+iwr https://get.pnpm.io/install.ps1 -useb | iex
+```
+
+```bash npm
+npm install -g pnpm
+```
+</CodeGroup>
+
+## Initial Setup
+
+### 1. Clone the Repository
+
+```bash
+git clone <repository-url>
+cd curaise
+```
+
+### 2. Run Assembly Script
+
+The `assemble` script installs dependencies, builds the common package, and generates the Prisma client:
+
+```bash
+pnpm assemble
+```
+
+<Accordion title="What does pnpm assemble do?">
+  This script runs three commands in sequence:
+
+  ```json package.json
+  {
+    "scripts": {
+      "assemble": "pnpm i && pnpm --filter 'common' build && pnpm --filter 'backend' prisma:generate"
+    }
+  }
+  ```
+
+  1. `pnpm i` - Installs all dependencies for all packages
+  2. `pnpm --filter 'common' build` - Compiles TypeScript in the common package
+  3. `pnpm --filter 'backend' prisma:generate` - Generates Prisma Client from schema
+</Accordion>
+
+## Environment Configuration
+
+Each package has separate environment files for development and production.
+
+### Backend Environment Variables
+
+The backend uses `.env.dev` and `.env.prod` files:
+
+```bash backend/.env.dev
+# Database
+DATABASE_URL="postgresql://user:password@localhost:5432/curaise_dev"
+DIRECT_URL="postgresql://user:password@localhost:5432/curaise_dev"
+
+# Supabase
+SUPABASE_URL="https://your-project.supabase.co"
+SUPABASE_SERVICE_KEY="your-service-role-key"
+
+# Mailgun
+MAILGUN_API_KEY="your-mailgun-api-key"
+MAILGUN_DOMAIN="mg.yourdomain.com"
+
+# Server
+PORT=3000
+NODE_ENV=development
+```
+
+<Warning>
+  The **service role key** (not the anon key) is required for the backend to validate JWTs. Never expose this key in the frontend.
+</Warning>
+
+### Frontend Environment Variables
+
+The frontend uses `.env.dev` which gets copied to `.env.local`:
+
+```bash frontend/.env.dev
+# Backend API
+NEXT_PUBLIC_API_URL="http://localhost:3000"
+
+# Supabase (public keys)
+NEXT_PUBLIC_SUPABASE_URL="https://your-project.supabase.co"
+NEXT_PUBLIC_SUPABASE_ANON_KEY="your-anon-key"
+```
+
+<Note>
+  Only variables prefixed with `NEXT_PUBLIC_` are accessible in browser code.
+</Note>
+
+### Environment Switching
+
+Switch between development and production environments:
+
+<Tabs>
+  <Tab title="Backend">
+    ```bash
+    cd backend
+    
+    # Switch to development
+    pnpm switch:dev
+    
+    # Switch to production
+    pnpm switch:prod
+    ```
+
+    These scripts copy `.env.dev` or `.env.prod` to `.env`.
+  </Tab>
+
+  <Tab title="Frontend">
+    The frontend automatically copies `.env.dev` to `.env.local` when running `pnpm dev`:
+
+    ```json frontend/package.json
+    {
+      "scripts": {
+        "dev": "cp .env.dev .env.local && next dev --turbopack --port 8080"
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Database Setup
+
+### Running Migrations
+
+Apply database migrations to create tables:
+
+<CodeGroup>
+```bash Development
+cd backend
+pnpm migrate:dev
+```
+
+```bash Production
+cd backend
+pnpm migrate:prod
+```
+</CodeGroup>
+
+<Accordion title="What these commands do">
+  ```json backend/package.json
+  {
+    "scripts": {
+      "migrate:dev": "cp .env.dev .env && prisma migrate dev",
+      "migrate:prod": "cp .env.prod .env && prisma migrate deploy"
+    }
+  }
+  ```
+
+  - `migrate:dev`: Switches to `.env.dev`, runs migrations, and regenerates Prisma Client
+  - `migrate:prod`: Switches to `.env.prod` and deploys migrations (doesn't regenerate client)
+</Accordion>
+
+### Seeding the Database
+
+Populate the database with sample data:
+
+```bash
+cd backend
+pnpm seed:dev
+```
+
+This runs the seed script at `backend/prisma/seed.ts`.
+
+### Regenerating Prisma Client
+
+After modifying `schema.prisma`, regenerate the client:
+
+```bash
+cd backend
+pnpm prisma:generate
+```
+
+## Running Development Servers
+
+### Option 1: Run Everything (Recommended)
+
+From the root directory, run both frontend and backend concurrently:
+
+```bash
+pnpm dev
+```
+
+This starts:
+- **Backend**: `http://localhost:3000`
+- **Frontend**: `http://localhost:8080`
+
+### Option 2: Run Individually
+
+<Tabs>
+  <Tab title="Backend Only">
+    ```bash
+    cd backend
+    pnpm dev
+    ```
+
+    Runs on `http://localhost:3000` with hot reload via nodemon.
+
+    ```json backend/package.json
+    {
+      "scripts": {
+        "dev": "cp .env.dev .env && nodemon --exec node --env-file='.env' -r ts-node/register ./src/server.ts"
+      }
+    }
+    ```
+  </Tab>
+
+  <Tab title="Frontend Only">
+    ```bash
+    cd frontend
+    pnpm dev
+    ```
+
+    Runs on `http://localhost:8080` with Turbopack.
+
+    ```json frontend/package.json
+    {
+      "scripts": {
+        "dev": "cp .env.dev .env.local && next dev --turbopack --port 8080"
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Building for Production
+
+### Backend Build
+
+```bash
+cd backend
+pnpm build
+```
+
+Compiles TypeScript to JavaScript in the `/dist` directory:
+
+```json backend/package.json
+{
+  "scripts": {
+    "build": "tsc --build && cp -r src/generated dist/src/"
+  }
+}
+```
+
+### Frontend Build
+
+```bash
+cd frontend
+pnpm build
+```
+
+Creates an optimized production build:
+
+```bash
+# After building, start the production server
+pnpm start
+```
+
+### Common Package Build
+
+Whenever you modify Zod schemas in the `common` package:
+
+```bash
+cd common
+pnpm build
+```
+
+<Warning>
+  Both backend and frontend import from `common`. Always rebuild after schema changes!
+</Warning>
+
+## Common Development Tasks
+
+### Adding a New Dependency
+
+<Tabs>
+  <Tab title="Backend">
+    ```bash
+    cd backend
+    pnpm add <package-name>
+    ```
+  </Tab>
+
+  <Tab title="Frontend">
+    ```bash
+    cd frontend
+    pnpm add <package-name>
+    ```
+  </Tab>
+
+  <Tab title="Common">
+    ```bash
+    cd common
+    pnpm add <package-name>
+    ```
+  </Tab>
+</Tabs>
+
+### Running Tests
+
+Backend uses Jest for testing:
+
+```bash
+cd backend
+pnpm test
+```
+
+### Linting Frontend Code
+
+```bash
+cd frontend
+pnpm lint
+```
+
+## Deployment
+
+### Heroku (Backend)
+
+The backend deploys automatically to Heroku via the `heroku-postbuild` script:
+
+```json package.json (root)
+{
+  "scripts": {
+    "heroku-postbuild": "pnpm --filter 'common' build && pnpm --filter 'backend' prisma:generate && pnpm --filter 'backend' build"
+  }
+}
+```
+
+This ensures:
+1. Common package is built
+2. Prisma client is generated
+3. Backend is compiled
+
+### Netlify (Frontend)
+
+The frontend deploys to Netlify. Build settings:
+
+- **Build command**: `pnpm build`
+- **Publish directory**: `.next`
+- **Node version**: 18 or higher
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Prisma Client not found">
+    Run `pnpm prisma:generate` in the backend directory:
+
+    ```bash
+    cd backend
+    pnpm prisma:generate
+    ```
+  </Accordion>
+
+  <Accordion title="Common package types not updating">
+    Rebuild the common package:
+
+    ```bash
+    cd common
+    pnpm build
+    ```
+
+    Then restart your dev servers.
+  </Accordion>
+
+  <Accordion title="Database connection errors">
+    1. Verify `DATABASE_URL` in `.env.dev` is correct
+    2. Ensure PostgreSQL is running
+    3. Check that migrations have been applied: `pnpm migrate:dev`
+  </Accordion>
+
+  <Accordion title="Frontend can't reach backend">
+    1. Verify backend is running on `http://localhost:3000`
+    2. Check `NEXT_PUBLIC_API_URL` in `frontend/.env.local`
+    3. Ensure no CORS errors in browser console
+  </Accordion>
+
+  <Accordion title="Authentication errors (401)">
+    1. Verify `SUPABASE_SERVICE_KEY` is set in backend `.env`
+    2. Check `NEXT_PUBLIC_SUPABASE_ANON_KEY` in frontend `.env.local`
+    3. Ensure user is logged in via Supabase Auth
+  </Accordion>
+</AccordionGroup>
+
+## Quick Reference
+
+<CardGroup cols={2}>
+  <Card title="Install & Setup" icon="download">
+    ```bash
+    pnpm assemble
+    cd backend && pnpm migrate:dev
+    cd backend && pnpm seed:dev
+    ```
+  </Card>
+
+  <Card title="Run Dev Servers" icon="play">
+    ```bash
+    # From root
+    pnpm dev
+    
+    # Or individually
+    cd backend && pnpm dev
+    cd frontend && pnpm dev
+    ```
+  </Card>
+
+  <Card title="After Schema Changes" icon="rotate">
+    ```bash
+    # Common package
+    cd common && pnpm build
+    
+    # Database schema
+    cd backend && pnpm migrate:dev
+    ```
+  </Card>
+
+  <Card title="Build for Production" icon="box">
+    ```bash
+    cd common && pnpm build
+    cd backend && pnpm build
+    cd frontend && pnpm build
+    ```
+  </Card>
+</CardGroup>

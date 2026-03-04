@@ -1,0 +1,634 @@
+---
+title: "Database Schema"
+description: "Complete overview of CURaise's PostgreSQL schema using Prisma ORM"
+---
+
+## Schema Overview
+
+CURaise uses **Prisma ORM** with PostgreSQL for type-safe database access. The schema is located at:
+
+```
+backend/prisma/schema.prisma
+```
+
+<Note>
+  The database uses **snake_case** for column names, but Prisma Client exposes them as **camelCase** in TypeScript.
+</Note>
+
+## Core Models
+
+### User
+
+Represents authenticated users linked to Supabase Auth.
+
+```prisma schema.prisma
+model User {
+  id        String   @id @db.Uuid
+  email     String   @unique
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  organizations Organization[]
+  orders        Order[]
+  referrals     Referral[]
+
+  @@map("users")
+}
+```
+
+<ParamField path="id" type="String (UUID)">
+  Primary key. **Must match Supabase Auth user ID**.
+</ParamField>
+
+<ParamField path="email" type="String">
+  Unique email address from Supabase Auth.
+</ParamField>
+
+<ParamField path="organizations" type="Organization[]">
+  Many-to-many relation. Organizations this user manages.
+</ParamField>
+
+<ParamField path="orders" type="Order[]">
+  One-to-many relation. Orders placed by this user.
+</ParamField>
+
+<ParamField path="referrals" type="Referral[]">
+  One-to-many relation. Referral links created by this user.
+</ParamField>
+
+---
+
+### PendingUser
+
+Users who have been invited to manage an organization but haven't created an account yet.
+
+```prisma schema.prisma
+model PendingUser {
+  id        String   @id @default(uuid()) @db.Uuid
+  email     String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  organizations Organization[]
+
+  @@map("pending_users")
+}
+```
+
+<Info>
+  When a `PendingUser` creates an account, they are converted to a full `User` and the `PendingUser` record is removed.
+</Info>
+
+---
+
+### Organization
+
+Fundraising organizations (e.g., clubs, teams, nonprofits).
+
+```prisma schema.prisma
+model Organization {
+  id                String   @id @default(uuid()) @db.Uuid
+  name              String   @unique
+  description       String
+  authorized        Boolean  @default(false)
+  logoUrl           String?  @map("logo_url")
+  websiteUrl        String?  @map("website_url")
+  instagramUsername String?  @map("instagram_username")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  admins        User[]
+  pendingAdmins PendingUser[]
+  fundraisers   Fundraiser[]
+
+  @@map("organizations")
+}
+```
+
+<ParamField path="authorized" type="Boolean">
+  Whether the organization has been approved by CURaise administrators. Only authorized organizations can publish fundraisers.
+</ParamField>
+
+<ParamField path="admins" type="User[]">
+  Many-to-many relation. Users who can manage this organization.
+</ParamField>
+
+<ParamField path="pendingAdmins" type="PendingUser[]">
+  Many-to-many relation. Invited users who haven't signed up yet.
+</ParamField>
+
+---
+
+### Fundraiser
+
+A fundraising campaign with items for sale.
+
+```prisma schema.prisma
+model Fundraiser {
+  id             String   @id @default(uuid()) @db.Uuid
+  name           String
+  description    String
+  published      Boolean  @default(false)
+  goalAmount     Decimal? @map("goal_amount") @db.Money
+  imageUrls      String[] @map("image_urls")
+  buyingStartsAt DateTime @map("buying_starts_at")
+  buyingEndsAt   DateTime @map("buying_ends_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  venmoUsername String? @map("venmo_username")
+  venmoEmail    String? @map("venmo_email")
+
+  organization   Organization   @relation(fields: [organizationId], references: [id])
+  organizationId String         @map("organization_id") @db.Uuid
+  pickupEvents   PickupEvent[]
+  items          Item[]
+  orders         Order[]
+  announcements  Announcement[]
+  referrals      Referral[]
+
+  @@map("fundraisers")
+}
+```
+
+<ParamField path="published" type="Boolean">
+  Only published fundraisers appear in public browse pages. Requires organization to be `authorized`.
+</ParamField>
+
+<ParamField path="goalAmount" type="Decimal" optional>
+  Optional fundraising goal. Uses `@db.Money` for precision.
+</ParamField>
+
+<ParamField path="imageUrls" type="String[]">
+  Array of image URLs for the fundraiser carousel.
+</ParamField>
+
+<ParamField path="venmoUsername" type="String" optional>
+  Venmo username for payment instructions.
+</ParamField>
+
+---
+
+### Item
+
+Products sold within a fundraiser.
+
+```prisma schema.prisma
+model Item {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  description String
+  imageUrl    String?  @map("image_url")
+  offsale     Boolean  @default(false)
+  limit       Int?
+  price       Decimal  @db.Money
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  fundraiser   Fundraiser   @relation(fields: [fundraiserId], references: [id])
+  fundraiserId String       @map("fundraiser_id") @db.Uuid
+  orders       OrderItems[]
+
+  @@map("items")
+}
+```
+
+<ParamField path="offsale" type="Boolean">
+  If `true`, item cannot be added to new orders (but existing orders retain it).
+</ParamField>
+
+<ParamField path="limit" type="Int" optional>
+  Maximum quantity per order. `null` = unlimited.
+</ParamField>
+
+<ParamField path="price" type="Decimal">
+  Item price. Uses `@db.Money` for precision (stores as currency).
+</ParamField>
+
+---
+
+### Order
+
+Customer purchases.
+
+```prisma schema.prisma
+model Order {
+  id            String        @id @default(uuid()) @db.Uuid
+  paymentMethod PaymentMethod @map("payment_method")
+  paymentStatus PaymentStatus @map("payment_status")
+  pickedUp      Boolean       @default(false) @map("picked_up")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  buyer        User         @relation(fields: [buyerId], references: [id])
+  buyerId      String       @map("buyer_id") @db.Uuid
+  fundraiser   Fundraiser   @relation(fields: [fundraiserId], references: [id])
+  fundraiserId String       @map("fundraiser_id") @db.Uuid
+  items        OrderItems[]
+  referral     Referral?    @relation(fields: [referralId], references: [id], onDelete: SetNull)
+  referralId   String?      @map("referral_id") @db.Uuid
+
+  @@map("orders")
+}
+```
+
+<ParamField path="paymentMethod" type="PaymentMethod enum">
+  How the customer pays: `VENMO` or `OTHER`.
+</ParamField>
+
+<ParamField path="paymentStatus" type="PaymentStatus enum">
+  Payment verification status: `UNVERIFIABLE`, `PENDING`, or `CONFIRMED`.
+</ParamField>
+
+<ParamField path="pickedUp" type="Boolean">
+  Whether the order has been collected by the customer.
+</ParamField>
+
+<ParamField path="referralId" type="String (UUID)" optional>
+  Links to a referral if the order came through a referral link. Uses `onDelete: SetNull` to preserve orders if referral is deleted.
+</ParamField>
+
+---
+
+### OrderItems (Junction Table)
+
+Many-to-many relationship between `Order` and `Item` with a `quantity` field.
+
+```prisma schema.prisma
+model OrderItems {
+  quantity Int
+
+  order   Order  @relation(fields: [orderId], references: [id])
+  orderId String @map("order_id") @db.Uuid
+  item    Item   @relation(fields: [itemId], references: [id])
+  itemId  String @map("item_id") @db.Uuid
+
+  @@id([orderId, itemId])
+  @@map("order_items")
+}
+```
+
+<Note>
+  Composite primary key `[orderId, itemId]` ensures each item appears only once per order.
+</Note>
+
+---
+
+### PickupEvent
+
+Time and location for order collection.
+
+```prisma schema.prisma
+model PickupEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  startsAt  DateTime @map("starts_at")
+  endsAt    DateTime @map("ends_at")
+  location  String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  fundraiser   Fundraiser @relation(fields: [fundraiserId], references: [id], onDelete: Cascade)
+  fundraiserId String     @map("fundraiser_id") @db.Uuid
+
+  @@map("pickup_events")
+}
+```
+
+<Warning>
+  Uses `onDelete: Cascade` - deleting a fundraiser automatically deletes all its pickup events.
+</Warning>
+
+---
+
+### Announcement
+
+Updates posted to a fundraiser.
+
+```prisma schema.prisma
+model Announcement {
+  id        String   @id @default(uuid()) @db.Uuid
+  message   String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  fundraiser   Fundraiser @relation(fields: [fundraiserId], references: [id], onDelete: Cascade)
+  fundraiserId String     @map("fundraiser_id") @db.Uuid
+
+  @@map("announcements")
+}
+```
+
+---
+
+### Referral
+
+Referral program tracking. Users can create referral links for fundraisers.
+
+```prisma schema.prisma
+model Referral {
+  id        String   @id @default(uuid()) @db.Uuid
+  approved  Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  fundraiser   Fundraiser @relation(fields: [fundraiserId], references: [id], onDelete: Cascade)
+  fundraiserId String     @map("fundraiser_id") @db.Uuid
+  referrer     User       @relation(fields: [referrerId], references: [id])
+  referrerId   String     @map("referrer_id") @db.Uuid
+  orders       Order[]
+
+  @@unique([fundraiserId, referrerId])
+  @@map("referrals")
+}
+```
+
+<ParamField path="approved" type="Boolean">
+  Whether the organization has approved this referral link.
+</ParamField>
+
+<Info>
+  `@@unique([fundraiserId, referrerId])` ensures each user can only have one referral per fundraiser.
+</Info>
+
+## Enums
+
+### PaymentMethod
+
+Supported payment methods:
+
+```prisma schema.prisma
+enum PaymentMethod {
+  VENMO
+  OTHER
+}
+```
+
+### PaymentStatus
+
+Payment verification states:
+
+```prisma schema.prisma
+enum PaymentStatus {
+  UNVERIFIABLE  // Payment method is OTHER (can't verify)
+  PENDING       // Awaiting payment verification
+  CONFIRMED     // Payment verified by admin
+}
+```
+
+## Relationships Diagram
+
+<Tabs>
+  <Tab title="User Relationships">
+    ```
+    User
+      ├─── organizations (Many-to-Many) ──→ Organization
+      ├─── orders (One-to-Many) ──→ Order
+      └─── referrals (One-to-Many) ──→ Referral
+    ```
+  </Tab>
+
+  <Tab title="Organization Relationships">
+    ```
+    Organization
+      ├─── admins (Many-to-Many) ──→ User
+      ├─── pendingAdmins (Many-to-Many) ──→ PendingUser
+      └─── fundraisers (One-to-Many) ──→ Fundraiser
+    ```
+  </Tab>
+
+  <Tab title="Fundraiser Relationships">
+    ```
+    Fundraiser
+      ├─── organization (Many-to-One) ──→ Organization
+      ├─── items (One-to-Many) ──→ Item
+      ├─── orders (One-to-Many) ──→ Order
+      ├─── pickupEvents (One-to-Many) ──→ PickupEvent
+      ├─── announcements (One-to-Many) ──→ Announcement
+      └─── referrals (One-to-Many) ──→ Referral
+    ```
+  </Tab>
+
+  <Tab title="Order Relationships">
+    ```
+    Order
+      ├─── buyer (Many-to-One) ──→ User
+      ├─── fundraiser (Many-to-One) ──→ Fundraiser
+      ├─── items (Many-to-Many via OrderItems) ──→ Item
+      └─── referral (Many-to-One, optional) ──→ Referral
+    ```
+  </Tab>
+</Tabs>
+
+## Schema Patterns
+
+### UUID Primary Keys
+
+All models use UUIDs for primary keys:
+
+```prisma
+id String @id @default(uuid()) @db.Uuid
+```
+
+<Note>
+  **Exception**: `User.id` does not use `@default(uuid())` because it must match the Supabase Auth user ID.
+</Note>
+
+### Money Fields
+
+Monetary values use `Decimal` with `@db.Money`:
+
+```prisma
+price Decimal @db.Money
+```
+
+In TypeScript, these are accessed as `Decimal` objects from `decimal.js`:
+
+```typescript
+import Decimal from 'decimal.js';
+
+const totalPrice = item.price.mul(quantity);
+```
+
+### Cascade Deletes
+
+Child records are automatically deleted when parent is removed:
+
+```prisma
+fundraiser Fundraiser @relation(
+  fields: [fundraiserId],
+  references: [id],
+  onDelete: Cascade  // Delete all pickup events when fundraiser is deleted
+)
+```
+
+### Timestamps
+
+Most models track creation and update times:
+
+```prisma
+createdAt DateTime @default(now()) @map("created_at")
+updatedAt DateTime @updatedAt @map("updated_at")
+```
+
+## Working with the Schema
+
+### Querying with Relations
+
+```typescript user.services.ts
+import { prisma } from "../../utils/prisma";
+
+export const getUserOrders = async (userId: string) => {
+  const orders = await prisma.order.findMany({
+    where: { buyerId: userId },
+    include: {
+      buyer: true,
+      fundraiser: {
+        select: {
+          id: true,
+          name: true,
+          organization: {
+            select: {
+              name: true,
+              logoUrl: true,
+            },
+          },
+          pickupEvents: {
+            orderBy: {
+              startsAt: "asc",
+            },
+          },
+        },
+      },
+      referral: {
+        include: {
+          referrer: true,
+        },
+      },
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+
+  return orders;
+};
+```
+
+### Creating Records
+
+```typescript
+const newFundraiser = await prisma.fundraiser.create({
+  data: {
+    name: "Spring Bake Sale",
+    description: "Support our team!",
+    organizationId: "123e4567-e89b-12d3-a456-426614174000",
+    buyingStartsAt: new Date("2024-03-01"),
+    buyingEndsAt: new Date("2024-03-15"),
+    imageUrls: ["https://example.com/image.jpg"],
+  },
+});
+```
+
+### Updating Records
+
+```typescript
+const updatedOrder = await prisma.order.update({
+  where: { id: orderId },
+  data: {
+    paymentStatus: "CONFIRMED",
+    pickedUp: true,
+  },
+});
+```
+
+## Migration Workflow
+
+### 1. Modify Schema
+
+Edit `backend/prisma/schema.prisma`:
+
+```prisma
+model Item {
+  // ... existing fields
+  stockQuantity Int?  @map("stock_quantity")  // New field
+}
+```
+
+### 2. Create Migration
+
+```bash
+cd backend
+pnpm migrate:dev
+```
+
+Prisma will:
+1. Detect schema changes
+2. Generate SQL migration file
+3. Apply migration to database
+4. Regenerate Prisma Client
+
+### 3. Update Seed (if needed)
+
+Modify `backend/prisma/seed.ts` to include new fields:
+
+```typescript
+const item = await prisma.item.create({
+  data: {
+    // ... existing fields
+    stockQuantity: 100,  // New field
+  },
+});
+```
+
+### 4. Run Seed
+
+```bash
+pnpm seed:dev
+```
+
+<Warning>
+  Always rebuild the `common` package after schema changes if you've updated related Zod schemas:
+  ```bash
+  cd common && pnpm build
+  ```
+</Warning>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use Transactions" icon="lock">
+    For operations that modify multiple tables:
+
+    ```typescript
+    await prisma.$transaction(async (tx) => {
+      await tx.order.create({ /* ... */ });
+      await tx.orderItems.createMany({ /* ... */ });
+    });
+    ```
+  </Card>
+
+  <Card title="Select Only What You Need" icon="filter">
+    Avoid fetching unnecessary relations:
+
+    ```typescript
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: { id: true, name: true },  // Don't fetch orders/orgs
+    });
+    ```
+  </Card>
+
+  <Card title="Handle Decimal Types" icon="calculator">
+    Use `decimal.js` for money calculations:
+
+    ```typescript
+    import Decimal from 'decimal.js';
+
+    const total = price.mul(quantity).toFixed(2);
+    ```
+  </Card>
+
+  <Card title="Validate Before Database" icon="shield">
+    Use Zod schemas to validate data before Prisma calls:
+
+    ```typescript
+    const validated = CreateOrderBody.parse(body);
+    await prisma.order.create({ data: validated });
+    ```
+  </Card>
+</CardGroup>

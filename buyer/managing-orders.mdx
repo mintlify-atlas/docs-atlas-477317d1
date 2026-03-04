@@ -1,0 +1,449 @@
+---
+title: Managing Orders
+description: View order history, track payment status, and manage pickup details for your CURaise orders
+---
+
+## Overview
+
+After placing an order, you can view detailed order information, track payment status, and access pickup details at `/buyer/order/{id}`. This page provides everything you need to complete your purchase and pick up your items.
+
+## Order Page Structure
+
+The order detail page displays comprehensive information in a card-based layout:
+
+<CardGroup cols={2}>
+  <Card title="Payment Banner" icon="credit-card">
+    Shows current payment status and next steps (PENDING, CONFIRMED, or UNVERIFIABLE)
+  </Card>
+  
+  <Card title="Order Summary" icon="receipt">
+    Pickup details, payment information, and buyer contact info
+  </Card>
+  
+  <Card title="Order Items" icon="shopping-bag">
+    List of purchased items with quantities and prices
+  </Card>
+  
+  <Card title="QR Code" icon="qrcode">
+    Scannable code for order verification at pickup
+  </Card>
+</CardGroup>
+
+## Payment Status Types
+
+Orders can have three different payment statuses:
+
+### PENDING
+
+Venmo payment initiated but not yet verified:
+
+```typescript
+export const BasicOrderSchema = z.object({
+  id: z.string().uuid(),
+  paymentMethod: z.enum(["VENMO", "OTHER"]),
+  paymentStatus: z.enum(["UNVERIFIABLE", "PENDING", "CONFIRMED"]),
+  pickedUp: z.boolean(),
+  createdAt: z.coerce.date(),
+  updatedAt: z.coerce.date(),
+  // ...
+});
+```
+
+Source: `common/schemas/order.ts:6-16`
+
+<Warning>
+**PENDING** status means:
+- You've submitted the order
+- Payment has not been verified yet
+- For Venmo orders: The system is waiting to detect your payment
+- **Action Required**: Complete Venmo payment if you haven't already
+</Warning>
+
+### CONFIRMED
+
+Payment successfully verified:
+
+```typescript
+if (order.paymentStatus === "CONFIRMED") {
+  return {
+    borderColor: "border-green-500",
+    textColor: "text-green-800 dark:text-green-200",
+    title: "Payment Confirmed",
+    message: "Your payment has been verified. No further action is required.",
+  };
+}
+```
+
+Source: `frontend/src/app/buyer/order/[id]/page.tsx:82-89`
+
+<Note>
+**CONFIRMED** status means:
+- Payment has been verified
+- Order is ready for pickup
+- No further action required from buyer
+</Note>
+
+### UNVERIFIABLE
+
+Payment cannot be automatically verified:
+
+```typescript
+// For OTHER payment method OR unverifiable VENMO
+if (order.paymentMethod === "OTHER" || 
+    (order.paymentStatus === "UNVERIFIABLE" && order.paymentMethod === "VENMO")) {
+  return {
+    borderColor: "border-blue-500",
+    textColor: "text-blue-800 dark:text-blue-200",
+    title: "Order Processed",
+    message: "Your order has been received. Payment will have to be manually verified by the fundraiser managers.",
+  };
+}
+```
+
+Source: `frontend/src/app/buyer/order/[id]/page.tsx:93-115`
+
+<Card title="UNVERIFIABLE Scenarios" icon="alert-circle">
+  Orders receive UNVERIFIABLE status when:
+  - Payment method is "OTHER" (cash in-person)
+  - Venmo payment couldn't be automatically matched to the order
+  - Manual verification by fundraiser managers is required
+</Card>
+
+## Venmo Payment Process
+
+For PENDING Venmo orders, the payment banner includes a "Pay with Venmo" button:
+
+### Venmo Deep Link
+
+```typescript
+const orderIdForPayment = order.id;  // Full UUID
+
+const venmoUrl = `https://venmo.com/${fundraiser.venmoUsername}?txn=pay&note=${encodeURIComponent(orderIdForPayment)}&amount=${encodeURIComponent(orderTotal)}`;
+```
+
+Source: `frontend/src/app/buyer/order/[id]/page.tsx:76-173`
+
+<Steps>
+  <Step title="Click 'Pay with Venmo' Button">
+    Opens Venmo app or web interface with pre-filled information
+  </Step>
+  
+  <Step title="Auto-filled Payment Details">
+    - **Recipient**: Fundraiser's Venmo username
+    - **Amount**: Order total (calculated from all items)
+    - **Note**: Full order ID (UUID format)
+  </Step>
+  
+  <Step title="Complete Payment in Venmo">
+    Confirm the transaction in the Venmo app
+  </Step>
+  
+  <Step title="Automatic Verification">
+    CURaise backend matches the Venmo transaction to your order using the order ID in the note field
+  </Step>
+</Steps>
+
+### Manual Payment Entry
+
+If the Venmo link doesn't work, expand the "Link not working?" details section:
+
+<Accordion title="Manual Venmo Payment Details">
+  ```typescript
+  // Venmo Username
+  <code>@{fundraiser.venmoUsername}</code>
+  <CopyButton text={fundraiser.venmoUsername} />
+  
+  // Amount
+  <code>${orderTotal}</code>
+  <CopyButton text={orderTotal} />
+  
+  // Order ID (CRITICAL - must be exact)
+  <code>{orderIdForPayment}</code>
+  <CopyButton text={orderIdForPayment} />
+  ```
+  
+  Source: `frontend/src/app/buyer/order/[id]/page.tsx:203-239`
+</Accordion>
+
+<Warning>
+The order ID in the Venmo note **must be exact** or the payment may not be automatically verified. Use the copy button to ensure accuracy.
+</Warning>
+
+## Order Summary Details
+
+The Order Summary card displays three sections:
+
+### Pickup Details
+
+```typescript
+{fundraiser.pickupEvents.map((event) => (
+  <div key={event.id} className="flex items-start gap-2">
+    <MapPin className="mt-0.5 h-4 w-4 text-muted-foreground flex-shrink-0" />
+    <span className="text-sm">
+      <span className="font-medium">{event.location}</span>
+      <br />
+      {format(event.startsAt, "h:mm a")} to {format(event.endsAt, "h:mm a")}
+    </span>
+  </div>
+))}
+```
+
+Source: `frontend/src/app/buyer/order/[id]/page.tsx:267-277`
+
+- **Date**: Formatted as "EEEE, M/d/yyyy" (e.g., "Monday, 3/15/2026")
+- **Location**: Physical address or description
+- **Time Range**: Start and end times in 12-hour format
+
+### Payment Details
+
+<CardGroup cols={2}>
+  <Card title="Payment Method" icon="credit-card">
+    Displays either "VENMO" or "OTHER" (shown as the enum value)
+  </Card>
+  
+  <Card title="Total Amount" icon="dollar-sign">
+    ```typescript
+    const orderTotal = order.items
+      .reduce(
+        (total, item) => total.plus(Decimal(item.item.price).times(item.quantity)),
+        new Decimal(0),
+      )
+      .toFixed(2);
+    ```
+    Source: `frontend/src/app/buyer/order/[id]/page.tsx:68-74`
+  </Card>
+</CardGroup>
+
+### Buyer Information
+
+```typescript
+export const CompleteOrderSchema = BasicOrderSchema.extend({
+  items: z.array(
+    z.object({
+      quantity: z.number().int().positive(),
+      item: CompleteItemSchema,
+    })
+  ),
+});
+```
+
+Source: `common/schemas/order.ts:19-26`
+
+Displays:
+- **Name**: Buyer's full name from user profile
+- **Email**: Contact email address
+
+## Order Items List
+
+The Order Items card shows detailed item information:
+
+```typescript
+{order.items.map((orderItem) => (
+  <div key={orderItem.item.id} className="grid grid-cols-[1fr_auto_auto] gap-4 items-center">
+    <div className="flex items-center gap-3">
+      {orderItem.item.imageUrl ? (
+        <img
+          src={orderItem.item.imageUrl || "/placeholder.svg"}
+          alt={orderItem.item.name}
+          className="w-12 h-12 rounded object-cover flex-shrink-0"
+        />
+      ) : (
+        <div className="w-12 h-12 bg-gray-200 dark:bg-gray-700 rounded flex-shrink-0" />
+      )}
+      <span className="text-sm">{orderItem.item.name}</span>
+    </div>
+    <div className="text-sm">x{orderItem.quantity}</div>
+    <div className="text-sm">${Decimal(orderItem.item.price).toFixed(2)}</div>
+  </div>
+))}
+```
+
+Source: `frontend/src/app/buyer/order/[id]/page.tsx:329-352`
+
+<Steps>
+  <Step title="Item Image">
+    Thumbnail (48x48px) or placeholder if no image available
+  </Step>
+  
+  <Step title="Item Name">
+    Product name from the fundraiser's catalog
+  </Step>
+  
+  <Step title="Quantity">
+    Number of units ordered (formatted as "x{quantity}")
+  </Step>
+  
+  <Step title="Unit Price">
+    Price per item (not multiplied by quantity)
+  </Step>
+</Steps>
+
+## QR Code for Pickup
+
+The order page includes a QR code for verification at pickup:
+
+```typescript
+<Card>
+  <CardHeader>
+    <CardTitle>Venmo QR Code</CardTitle>
+    <CardDescription>
+      Show this to DTI at pick up to get your order.
+    </CardDescription>
+  </CardHeader>
+  <CardContent>
+    <OrderQRCodeDisplay orderId={order.id} />
+  </CardContent>
+</Card>
+```
+
+Source: `frontend/src/app/buyer/order/[id]/page.tsx:366-376`
+
+<Note>
+The QR code encodes the order ID, allowing fundraiser managers to quickly look up and verify your order during pickup.
+</Note>
+
+## Order Timestamps
+
+Order metadata is displayed at the top of the page:
+
+```typescript
+<div className="flex flex-col md:flex-row md:items-center gap-1 md:gap-2 text-sm text-gray-800">
+  <span>
+    Ordered on {format(order.createdAt, "MMM d, yyyy 'at' h:mm a")}
+  </span>
+  <span className="hidden md:inline">|</span>
+  <span>Order Id: {order.id}</span>
+</div>
+```
+
+Source: `frontend/src/app/buyer/order/[id]/page.tsx:136-143`
+
+- **Creation Date**: When the order was submitted
+- **Order ID**: Full UUID for reference
+
+## Pickup Status
+
+The `pickedUp` boolean field tracks whether items have been collected:
+
+```typescript
+export const BasicOrderSchema = z.object({
+  // ...
+  pickedUp: z.boolean(),
+  // ...
+});
+```
+
+Source: `common/schemas/order.ts:10`
+
+<Card title="Pickup Tracking" icon="package">
+  While the `pickedUp` field exists in the schema, it's managed by fundraiser organizers when you collect your order. Buyers cannot self-mark orders as picked up.
+</Card>
+
+## Payment Status Badge
+
+A visual badge displays the current payment status:
+
+```typescript
+<PaymentStatusBadge order={order} />
+```
+
+Source: `frontend/src/app/buyer/order/[id]/page.tsx:134`
+
+The badge component renders different styles based on the payment status (PENDING, CONFIRMED, UNVERIFIABLE).
+
+## Confetti Animation
+
+Successful order submission triggers a confetti animation:
+
+```typescript
+<ConfettiWrapper />
+```
+
+Source: `frontend/src/app/buyer/order/[id]/page.tsx:130`
+
+<Note>
+The confetti appears when accessing the order page with `?fromCheckout=true` query parameter, indicating the order was just created.
+</Note>
+
+## Server-Side Data Fetching
+
+The order page requires authentication and fetches data server-side:
+
+```typescript
+export default async function OrderPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  await connection(); // dynamic rendering
+  
+  const supabase = await createClient();
+  const id = (await params).id;
+  
+  // Protect page - require authentication
+  const { data: { user }, error: error1 } = await supabase.auth.getUser();
+  if (error1 || !user) {
+    redirect("/");
+  }
+  
+  // Get JWT token
+  const { data: { session }, error: error2 } = await supabase.auth.getSession();
+  if (error2 || !session?.access_token) {
+    throw new Error("No session found");
+  }
+  
+  // Fetch order data
+  const order = await serverFetch(`/order/${id}`, {
+    token: session.access_token,
+    schema: CompleteOrderSchema,
+  });
+  
+  const fundraiser = await serverFetch(`/fundraiser/${order.fundraiser.id}`, {
+    token: session.access_token,
+    schema: BasicFundraiserSchema,
+  });
+  // ...
+}
+```
+
+Source: `frontend/src/app/buyer/order/[id]/page.tsx:31-66`
+
+<Warning>
+Orders are protected routes. Unauthenticated users are redirected to the home page. Additionally, users can only view their own orders (enforced by the backend).
+</Warning>
+
+## Responsive Layout
+
+The order page uses CSS Grid for responsive card arrangement:
+
+```typescript
+<div className="grid gap-6 lg:grid-cols-3 lg:auto-rows-min">
+  {/* Row 1, Column 1 - Payment Banner (1/3 width) */}
+  <Card className="order-1 lg:order-none lg:row-start-1 lg:col-start-1" />
+  
+  {/* Row 1, Columns 2-3 - Order Summary (2/3 width) */}
+  <Card className="order-4 lg:order-none lg:row-start-1 lg:col-start-2 lg:col-span-2" />
+  
+  {/* Row 2, Column 3 - Order Items */}
+  <Card className="order-3 lg:order-none lg:row-start-2 lg:col-start-3" />
+  
+  {/* Row 2, Columns 1-2 - QR Code (2/3 width) */}
+  <Card className="order-2 lg:order-none lg:row-start-2 lg:col-start-1 lg:col-span-2" />
+</div>
+```
+
+Source: `frontend/src/app/buyer/order/[id]/page.tsx:145-376`
+
+<Accordion title="Mobile Card Order">
+  On mobile, the `order-{n}` classes rearrange cards for better UX:
+  1. Payment Banner
+  2. QR Code
+  3. Order Items
+  4. Order Summary
+</Accordion>
+
+## Related Resources
+
+- [Placing Orders](/buyer/placing-orders)
+- [Browse Fundraisers](/buyer/browse-fundraisers)
+- [Account Settings](/buyer/account-settings)

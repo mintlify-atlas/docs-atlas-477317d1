@@ -1,0 +1,189 @@
+---
+title: Browsing Fundraisers
+description: Discover and explore active fundraising campaigns on CURaise
+---
+
+## Overview
+
+The Browse Fundraisers page (`/buyer/browse`) allows you to discover active fundraising campaigns from various organizations. You can search, filter, and view detailed information about each campaign before making a purchase.
+
+## Accessing the Browse Page
+
+Navigate to `/buyer/browse` to view all published fundraisers. The page displays fundraisers in a responsive grid layout:
+- **Mobile**: Single column
+- **Tablet**: 2 columns
+- **Desktop**: 3 columns
+
+<Note>
+Only published fundraisers are visible to buyers. Unpublished campaigns require a preview link with `?preview=true` parameter.
+</Note>
+
+## Searching for Fundraisers
+
+Use the search functionality to find specific campaigns by name:
+
+```typescript
+// Search is implemented client-side with useMemo
+const filteredFundraisers = useMemo(() => {
+  if (searchQuery) {
+    const query = searchQuery.toLowerCase();
+    return fundraisers.filter((fundraiser) =>
+      fundraiser.name.toLowerCase().includes(query)
+    );
+  }
+  return fundraisers;
+}, [fundraisers, searchQuery]);
+```
+
+Source: `frontend/src/app/buyer/browse/components/FundraisersList.tsx:43-47`
+
+## Filtering Options
+
+CURaise provides a dropdown filter with the following options:
+
+<Steps>
+  <Step title="All Fundraisers">
+    Shows every published fundraiser (default view)
+  </Step>
+  
+  <Step title="Pick-up Today">
+    Filters fundraisers with pickup events scheduled for today. The filter compares pickup event dates (ignoring time) to the current date.
+  </Step>
+</Steps>
+
+### Pick-up Today Filter Logic
+
+```typescript
+if (filter === "pickup-today") {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  filtered = filtered.filter((fundraiser) =>
+    fundraiser.pickupEvents.some((event) => {
+      const eventDate = new Date(event.startsAt);
+      eventDate.setHours(0, 0, 0, 0);
+      return eventDate.getTime() === today.getTime();
+    })
+  );
+}
+```
+
+Source: `frontend/src/app/buyer/browse/components/FundraisersList.tsx:54-65`
+
+## Fundraiser Card Information
+
+Each fundraiser card displays:
+
+- **Image**: Primary fundraiser image (240px height on mobile/desktop)
+- **Name**: Fundraiser campaign title
+- **Organization**: Hosting organization name
+- **Link**: Clicking anywhere on the card navigates to `/buyer/fundraiser/{id}`
+
+<Card title="Data Structure" icon="code">
+  Fundraisers use the `BasicFundraiserSchema` from the shared common package:
+  
+  ```typescript
+  export const BasicFundraiserSchema = z.object({
+    id: z.string().uuid(),
+    name: z.string().min(1).max(255),
+    description: z.string(),
+    published: z.boolean(),
+    venmoUsername: z.string().min(1).max(255).nullish(),
+    venmoEmail: z.string().min(1).max(255).nullish(),
+    goalAmount: MoneySchema.nullish(),
+    buyingStartsAt: z.coerce.date(),
+    buyingEndsAt: z.coerce.date(),
+    organization: BasicOrganizationSchema,
+    imageUrls: z.array(z.string().url()),
+    pickupEvents: z.array(PickupEventSchema),
+  });
+  ```
+  
+  Source: `common/schemas/fundraiser.ts:25-38`
+</Card>
+
+## Empty States
+
+When no fundraisers match the current filters:
+
+<CardGroup cols={2}>
+  <Card title="No Results (Filter: All)" icon="inbox">
+    **Message**: "No fundraisers available"
+    
+    **Subtext**: "Check back soon for upcoming fundraisers"
+  </Card>
+  
+  <Card title="No Results (Filter: Pick-up Today)" icon="calendar">
+    **Message**: "No fundraisers with pick-up today"
+    
+    **Subtext**: "Check back for fundraisers with pick-ups scheduled for today"
+  </Card>
+</CardGroup>
+
+## API Integration
+
+The browse page fetches fundraiser data server-side:
+
+```typescript
+export default async function BrowseFundraisersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ search?: string }>;
+}) {
+  await connection(); // ensures dynamic rendering
+
+  const fundraisers = await serverFetch("/fundraiser", {
+    schema: BasicFundraiserSchema.array(),
+  });
+  
+  const params = await searchParams;
+  const searchQuery = params.search || "";
+
+  return (
+    <div className="flex flex-col px-4 md:px-[157px] pt-10">
+      <FundraisersList fundraisers={fundraisers} searchQuery={searchQuery} />
+    </div>
+  );
+}
+```
+
+Source: `frontend/src/app/buyer/browse/page.tsx:6-24`
+
+<Note>
+The page uses Next.js server components with `connection()` to ensure dynamic rendering at runtime, not static generation at build time.
+</Note>
+
+## Viewing Fundraiser Details
+
+Click on any fundraiser card to navigate to the detail page at `/buyer/fundraiser/{id}`, where you can:
+
+- View full campaign description
+- See all available items for purchase
+- Check pickup event details
+- Add items to your cart
+- Read announcements from organizers
+
+<Warning>
+Fundraisers have buying windows defined by `buyingStartsAt` and `buyingEndsAt`. While not enforced on the browse page, the detail page may restrict purchases outside this timeframe.
+</Warning>
+
+## Best Practices
+
+<Accordion title="Performance Optimization">
+  - The component uses `useMemo` for filtering to prevent unnecessary recalculations
+  - Images use Next.js `Image` component with proper sizing attributes
+  - Horizontal scrolling on mobile uses `-mx-4 px-4` pattern for edge-to-edge scroll
+</Accordion>
+
+<Accordion title="Accessibility">
+  - All interactive elements are keyboard accessible
+  - Images include alt text with fundraiser names
+  - Empty states provide clear messaging
+  - Filter buttons have proper ARIA labels
+</Accordion>
+
+## Related Resources
+
+- [Viewing Fundraiser Details](/buyer/placing-orders#viewing-items)
+- [Adding Items to Cart](/buyer/placing-orders#adding-to-cart)
+- [Account Settings](/buyer/account-settings)

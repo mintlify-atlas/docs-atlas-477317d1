@@ -1,0 +1,278 @@
+---
+title: Authentication
+description: How to authenticate with the CURaise API
+---
+
+## Overview
+
+The CURaise API uses **JWT-based authentication** powered by Supabase Auth. All authenticated endpoints require a valid Bearer token in the `Authorization` header.
+
+## Authentication Flow
+
+### 1. User Sign Up/Login
+
+Authentication is handled through Supabase on the client side:
+
+```typescript
+import { createClient } from '@supabase/supabase-js'
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+)
+
+// Sign up
+const { data, error } = await supabase.auth.signUp({
+  email: 'user@example.com',
+  password: 'secure-password'
+})
+
+// Sign in
+const { data, error } = await supabase.auth.signInWithPassword({
+  email: 'user@example.com',
+  password: 'secure-password'
+})
+```
+
+### 2. Retrieve Access Token
+
+After successful authentication, retrieve the JWT access token:
+
+```typescript
+const { data: { session } } = await supabase.auth.getSession()
+const accessToken = session?.access_token
+```
+
+### 3. Make Authenticated Requests
+
+Include the access token in the `Authorization` header:
+
+```bash
+curl -X GET https://api.curaise.com/api/user/123e4567-e89b-12d3-a456-426614174000 \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+```typescript
+fetch('https://api.curaise.com/api/user/123e4567-e89b-12d3-a456-426614174000', {
+  headers: {
+    'Authorization': `Bearer ${accessToken}`,
+    'Content-Type': 'application/json'
+  }
+})
+```
+
+## Authorization Header Format
+
+The `Authorization` header must follow this exact format:
+
+```
+Authorization: Bearer <access_token>
+```
+
+**Important:** The word "Bearer" must be followed by a single space and then the JWT token.
+
+## Token Validation
+
+The backend validates tokens using the Supabase service role key:
+
+```typescript
+// Backend validation (automatic via middleware)
+const { data: { user } } = await supabase.auth.getUser(token)
+
+if (!user) {
+  return 401 Unauthorized
+}
+```
+
+**Validation checks:**
+- Token signature is valid
+- Token has not expired
+- User exists in Supabase Auth
+
+## Protected Endpoints
+
+### Always Require Authentication
+
+These endpoints always require a valid Bearer token:
+
+**Fundraisers:**
+- `POST /api/fundraiser/create`
+- `POST /api/fundraiser/:id/update`
+- `POST /api/fundraiser/:id/publish`
+- `GET /api/fundraiser/:id/orders`
+- `GET /api/fundraiser/:id/analytics`
+- All item management endpoints
+- All announcement endpoints
+- All pickup event endpoints
+- All referral endpoints
+
+**Orders:**
+- `GET /api/order/:id`
+- `POST /api/order/create`
+- `POST /api/order/:id/complete-pickup`
+- `POST /api/order/:id/confirm-payment`
+
+**Organizations:**
+- `POST /api/organization/create`
+- `POST /api/organization/:id/update`
+
+**Users:**
+- `GET /api/user/:id/orders`
+- `GET /api/user/:id/organizations`
+- `POST /api/user/:id` (update)
+
+### Public Endpoints
+
+These endpoints do not require authentication:
+
+- `GET /api/fundraiser` - List all published fundraisers
+- `GET /api/fundraiser/:id` - Get fundraiser details
+- `GET /api/fundraiser/:id/items` - List fundraiser items
+- `GET /api/organization/:id` - Get organization details
+- `GET /api/user/search` - Search users by email
+- `GET /api/user/:id` - Get user profile
+
+### Optional Authentication
+
+These endpoints accept but don't require authentication:
+
+- `GET /api/organization/:id/fundraisers` - Shows unpublished fundraisers to org admins
+
+## Authorization Rules
+
+Authentication confirms identity; authorization confirms permissions.
+
+### Organization Admins
+
+To modify an organization or its fundraisers, the authenticated user must be in the organization's `admins` array:
+
+```typescript
+// Authorization check (backend)
+if (!organization.admins.some(admin => admin.id === user.id)) {
+  return 403 Forbidden
+}
+```
+
+### Order Access
+
+Users can access orders if they are either:
+1. The buyer of the order
+2. An admin of the fundraiser's organization
+
+```typescript
+if (order.buyerId !== user.id && 
+    !order.fundraiser.organization.admins.some(admin => admin.id === user.id)) {
+  return 403 Forbidden
+}
+```
+
+### User Profile Updates
+
+Users can only update their own profile:
+
+```typescript
+if (req.params.id !== user.id) {
+  return 403 Forbidden
+}
+```
+
+## Error Responses
+
+### 401 Unauthorized
+
+Returned when the token is missing, invalid, or expired:
+
+```json
+{
+  "message": "Invalid authorization token"
+}
+```
+
+**Common causes:**
+- Missing `Authorization` header
+- Malformed token
+- Expired token
+- Invalid signature
+
+### 403 Forbidden
+
+Returned when the user is authenticated but lacks permission:
+
+```json
+{
+  "message": "Unauthorized to update fundraiser"
+}
+```
+
+**Common causes:**
+- User is not an admin of the organization
+- User trying to access another user's orders
+- User trying to modify resources they don't own
+
+## Token Lifecycle
+
+### Token Expiration
+
+Supabase access tokens expire after a configured duration (typically 1 hour). The frontend should handle token refresh:
+
+```typescript
+// Auto-refresh handled by Supabase client
+supabase.auth.onAuthStateChange((event, session) => {
+  if (event === 'TOKEN_REFRESHED') {
+    const newToken = session?.access_token
+    // Update stored token
+  }
+})
+```
+
+### Logout
+
+To invalidate a session:
+
+```typescript
+await supabase.auth.signOut()
+```
+
+## Security Best Practices
+
+1. **Never expose tokens in URLs** - Always use headers
+2. **Use HTTPS** - Tokens must be transmitted over secure connections
+3. **Store tokens securely** - Use secure storage (httpOnly cookies, secure localStorage)
+4. **Implement token refresh** - Handle expiration gracefully
+5. **Validate on every request** - Backend validates tokens on each endpoint
+6. **Don't share tokens** - Each user should have their own token
+
+## Example: Authenticated Request
+
+```javascript
+// Complete example with error handling
+async function createOrder(orderData) {
+  const { data: { session } } = await supabase.auth.getSession()
+  
+  if (!session) {
+    throw new Error('User not authenticated')
+  }
+  
+  const response = await fetch('https://api.curaise.com/api/order/create', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${session.access_token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(orderData)
+  })
+  
+  if (response.status === 401) {
+    // Token expired, refresh and retry
+    await supabase.auth.refreshSession()
+    // Retry request...
+  }
+  
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.message)
+  }
+  
+  return response.json()
+}
+```
